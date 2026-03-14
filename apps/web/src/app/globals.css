@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Input field base style — reused across all forms */
+.input-field {
+  display: block;
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: #111827;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input-field::placeholder {
+  color: #9ca3af;
+}
+
+.input-field:focus {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px #10b981;
+}
+
+.input-field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

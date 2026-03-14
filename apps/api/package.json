@@ -1,0 +1,35 @@
+{
+  "name": "@ovpn/api",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "prettier --check ."
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/jwt": "^9.0.3",
+    "@fastify/rate-limit": "^10.2.2",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^5.2.2",
+    "@ovpn/db": "workspace:*",
+    "@ovpn/shared": "workspace:*",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^5.0.1",
+    "knex": "^3.1.0",
+    "pino": "^9.6.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

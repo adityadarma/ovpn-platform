@@ -1,0 +1,42 @@
+services:
+  # Development API — hot-reload with tsx watch
+  api:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install -g pnpm && pnpm install && pnpm --filter @ovpn/api dev"
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      JWT_SECRET: dev-secret-please-change-in-production-32chars
+      DATABASE_TYPE: sqlite
+      DATABASE_SQLITE_PATH: /data/ovpn.sqlite
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/app
+      - api_data:/data
+      - /app/node_modules
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:3001/api/v1/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Development Web UI — Next.js dev server
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install -g pnpm && pnpm install && pnpm --filter @ovpn/web dev"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  api_data:

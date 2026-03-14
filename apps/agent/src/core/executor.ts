@@ -1,0 +1,60 @@
+import type { AgentEnv } from '../config/env'
+import type { TaskAction } from '@ovpn/shared'
+import { handleCreateUser } from '../handlers/create-user'
+import { handleRevokeUser } from '../handlers/revoke-user'
+import { handleReloadOpenvpn } from '../handlers/reload-openvpn'
+import { handleGenerateConfig } from '../handlers/generate-config'
+import { handleAddFirewallRule } from '../handlers/add-firewall-rule'
+import { handleRemoveFirewallRule } from '../handlers/remove-firewall-rule'
+
+interface Task {
+  id: string
+  action: string
+  payload: Record<string, unknown>
+}
+
+type HandlerFn = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>
+
+const HANDLERS: Partial<Record<TaskAction, HandlerFn>> = {
+  create_vpn_user: handleCreateUser,
+  revoke_vpn_user: handleRevokeUser,
+  reload_openvpn: handleReloadOpenvpn,
+  generate_client_config: handleGenerateConfig,
+  add_firewall_rule: handleAddFirewallRule,
+  remove_firewall_rule: handleRemoveFirewallRule,
+}
+
+export async function executeTask(env: AgentEnv, task: Task): Promise<void> {
+  const handler = HANDLERS[task.action as TaskAction]
+
+  let status: 'success' | 'failed' = 'failed'
+  let result: Record<string, unknown> = {}
+  let errorMessage: string | undefined
+
+  if (!handler) {
+    console.warn(`[executor] Unknown task action: ${task.action}`)
+    errorMessage = `Unknown action: ${task.action}`
+  } else {
+    try {
+      result = await handler(task.payload)
+      status = 'success'
+    } catch (err) {
+      console.error(`[executor] Task ${task.id} failed:`, (err as Error).message)
+      errorMessage = (err as Error).message
+    }
+  }
+
+  // Report result back to manager
+  try {
+    await fetch(`${env.AGENT_MANAGER_URL}/api/v1/tasks/${task.id}/result`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.AGENT_SECRET_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status, result, errorMessage }),
+    })
+  } catch (err) {
+    console.error(`[executor] Failed to report result for task ${task.id}:`, (err as Error).message)
+  }
+}
