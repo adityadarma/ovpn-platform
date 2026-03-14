@@ -10,6 +10,8 @@ import {
   Shield,
   Settings,
   LogOut,
+  Network,
+  UsersRound,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -26,6 +28,8 @@ import {
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/users', label: 'Users', icon: Users },
+  { href: '/groups', label: 'Groups', icon: UsersRound },
+  { href: '/networks', label: 'Networks', icon: Network },
   { href: '/nodes', label: 'Nodes', icon: Server },
   { href: '/sessions', label: 'Sessions', icon: Activity },
   { href: '/policies', label: 'Policies', icon: Shield },

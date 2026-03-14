@@ -10,4 +10,5 @@ export interface VpnNode {
   version: string | null
   lastSeen: string | null
   createdAt: string
+  activeSessions?: number
 }

@@ -26,6 +26,12 @@ importers:
       '@ovpn/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      bcryptjs:
+        specifier: ^2.4.3
+        version: 2.4.3
+      commander:
+        specifier: ^14.0.3
+        version: 14.0.3
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -36,6 +42,9 @@ importers:
         specifier: ^3.24.2
         version: 3.25.76
     devDependencies:
+      '@types/bcryptjs':
+        specifier: ^2.4.6
+        version: 2.4.6
       '@types/node':
         specifier: ^24.12.0
         version: 24.12.0
@@ -1485,6 +1494,9 @@ packages:
     resolution: {integrity: sha512-1ghYO3HnxGec0TCGBXiDLVns4eCSx4zJpxnHrlqFQajmhfKMQBzUGDdkMK7fUW7PTHTeLf+j87aTuKuuwWzMGw==}
     engines: {node: '>=6.0.0'}
     hasBin: true
+
+  bcryptjs@2.4.3:
+    resolution: {integrity: sha512-V/Hy/X9Vt7f3BbPJEi8BdVFMByHi+jNXrYkW3huaybV/kQ0KJg0Y6PkEMbn+zeT+i+SiKZ/HMqJGIIt4LZDqNQ==}
 
   bcryptjs@3.0.3:
     resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
@@ -5192,6 +5204,8 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.10.7: {}
+
+  bcryptjs@2.4.3: {}
 
   bcryptjs@3.0.3: {}
 
