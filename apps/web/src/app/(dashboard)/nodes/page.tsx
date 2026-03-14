@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Plus, Trash2, MapPin, Clock, Activity, Server, X } from 'lucide-react'
+import { Plus, Trash2, MapPin, Clock, Activity, Server, X, Copy, CheckCircle2 } from 'lucide-react'
 import type { VpnNode } from '@ovpn/shared'
 
 interface NodeForm {
@@ -13,10 +13,16 @@ interface NodeForm {
   region: string
 }
 
+interface RegisterResponse extends VpnNode {
+  token?: string
+}
+
 export default function NodesPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<NodeForm>({ hostname: '', ipAddress: '', region: '' })
+  const [registeredNode, setRegisteredNode] = useState<{ id: string; token: string } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const { data: nodes = [], isLoading } = useQuery<VpnNode[]>({
     queryKey: ['nodes'],
@@ -24,15 +30,40 @@ export default function NodesPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: NodeForm) => api.post<VpnNode>('/api/v1/nodes', data),
-    onSuccess: () => {
+    mutationFn: (data: NodeForm) => api.post<RegisterResponse>('/api/v1/nodes/register', {
+      hostname: data.hostname,
+      ip: data.ipAddress,
+      region: data.region,
+      version: 'web-registered',
+      port: 1194,
+    }),
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['nodes'] })
-      setShowForm(false)
-      setForm({ hostname: '', ipAddress: '', region: '' })
-      toast.success('Node registered')
+      if (data.id && data.token) {
+        setRegisteredNode({ id: data.id, token: data.token })
+      } else {
+        setShowForm(false)
+        setForm({ hostname: '', ipAddress: '', region: '' })
+      }
+      toast.success('Node registered successfully')
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  const copyCredentials = () => {
+    if (!registeredNode) return
+    const text = `AGENT_NODE_ID=${registeredNode.id}\nAGENT_SECRET_TOKEN=${registeredNode.token}`
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+    toast.success('Credentials copied to clipboard')
+  }
+
+  const closeRegistration = () => {
+    setRegisteredNode(null)
+    setShowForm(false)
+    setForm({ hostname: '', ipAddress: '', region: '' })
+  }
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/api/v1/nodes/${id}`),
@@ -134,71 +165,108 @@ export default function NodesPage() {
       )}
 
       {/* Add Node Modal */}
-      {showForm && (
+      {(showForm || registeredNode) && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <div>
-                <h2 className="font-semibold text-gray-900">Register Node</h2>
-                <p className="text-sm text-gray-400 mt-0.5">Add a new VPN node</p>
-              </div>
-              <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <form
-              onSubmit={e => { e.preventDefault(); createMutation.mutate(form) }}
-              className="p-5 space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Hostname <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={form.hostname}
-                  onChange={e => setForm({ ...form, hostname: e.target.value })}
-                  placeholder="vpn-node-1"
-                  required
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">IP Address <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={form.ipAddress}
-                  onChange={e => setForm({ ...form, ipAddress: e.target.value })}
-                  placeholder="203.0.113.1"
-                  required
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Region</label>
-                <input
-                  type="text"
-                  value={form.region}
-                  onChange={e => setForm({ ...form, region: e.target.value })}
-                  placeholder="Singapore"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            {registeredNode ? (
+              // Success / Agent Credentials View
+              <div className="p-6">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 mb-4">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-center text-gray-900 mb-2">Node Registered!</h3>
+                <p className="text-sm text-center text-gray-500 mb-6">
+                  Save these credentials now. The secret token will <strong className="text-gray-900">never be shown again</strong>. Deploy your agent using these environment variables:
+                </p>
+
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 mb-6 relative group">
+                  <pre className="text-xs font-mono text-gray-800 whitespace-pre-wrap break-all">
+                    <span className="text-emerald-600">AGENT_NODE_ID</span>={registeredNode.id}{'\n'}
+                    <span className="text-emerald-600">AGENT_SECRET_TOKEN</span>={registeredNode.token}
+                  </pre>
+                  <button
+                    onClick={copyCredentials}
+                    className="absolute top-2 right-2 p-1.5 bg-white border border-gray-200 rounded text-gray-400 hover:text-gray-600 shadow-sm transition opacity-0 group-hover:opacity-100"
+                    title="Copy to clipboard"
+                  >
+                    {copied ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
+
                 <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                  onClick={closeRegistration}
+                  className="w-full px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createMutation.isPending}
-                  className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {createMutation.isPending ? 'Registering...' : 'Register Node'}
+                  I have saved these credentials
                 </button>
               </div>
-            </form>
+            ) : (
+              // Registration Form
+              <>
+                <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                  <div>
+                    <h2 className="font-semibold text-gray-900">Register Node</h2>
+                    <p className="text-sm text-gray-400 mt-0.5">Add a new VPN node</p>
+                  </div>
+                  <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <form
+                  onSubmit={e => { e.preventDefault(); createMutation.mutate(form) }}
+                  className="p-5 space-y-4"
+                >
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Hostname <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={form.hostname}
+                      onChange={e => setForm({ ...form, hostname: e.target.value })}
+                      placeholder="vpn-node-1"
+                      required
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">IP Address <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={form.ipAddress}
+                      onChange={e => setForm({ ...form, ipAddress: e.target.value })}
+                      placeholder="203.0.113.1"
+                      required
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Region</label>
+                    <input
+                      type="text"
+                      value={form.region}
+                      onChange={e => setForm({ ...form, region: e.target.value })}
+                      placeholder="Singapore"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowForm(false)}
+                      className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={createMutation.isPending}
+                      className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {createMutation.isPending ? 'Registering...' : 'Register Node'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

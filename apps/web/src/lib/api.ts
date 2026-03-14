@@ -5,12 +5,19 @@ const API_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001'
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = useAuthStore.getState().token
 
+  const headers: Record<string, string> = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+
+  if (options?.body) {
+    headers['Content-Type'] = 'application/json'
+  }
+
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
+      ...headers,
+      ...options?.headers as Record<string, string>,
     },
   })
 
@@ -32,8 +39,8 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   get: <T>(path: string) => apiFetch<T>(path),
   post: <T>(path: string, body?: unknown) =>
-    apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+    apiFetch<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body: unknown) =>
-    apiFetch<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+    apiFetch<T>(path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined }),
   delete: <T = void>(path: string) => apiFetch<T>(path, { method: 'DELETE' }),
 }

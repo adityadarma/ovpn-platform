@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/store/auth.store'
 import { UserPlus, Trash2, Download, Shield, Search, X } from 'lucide-react'
 import type { User } from '@ovpn/shared'
 import { toast } from 'sonner'
@@ -26,7 +27,10 @@ export default function UsersPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateUserPayload) => api.post<User>('/api/v1/users', data),
+    mutationFn: (data: CreateUserPayload) => api.post<User>('/api/v1/users', {
+      ...data,
+      email: data.email || undefined,
+    }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })
       setShowForm(false)
@@ -44,6 +48,49 @@ export default function UsersPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  const [isDownloading, setIsDownloading] = useState<string | null>(null)
+  
+  const handleDownloadConfig = async (user: User) => {
+    try {
+      setIsDownloading(user.id)
+      const token = useAuthStore.getState().token
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+      
+      const res = await fetch(`${apiUrl}/api/v1/users/${user.id}/ovpn`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null)
+        throw new Error(errorData?.message || errorData?.error || 'Failed to generate config')
+      }
+      
+      // Attempt to get filename from Content-Disposition header
+      let filename = `${user.username}.ovpn`
+      const disposition = res.headers.get('Content-Disposition')
+      if (disposition && disposition.includes('filename=')) {
+        const matches = /filename="([^"]+)"/.exec(disposition)
+        if (matches?.[1]) filename = matches[1]
+      }
+      
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      a.remove()
+      
+      toast.success('Configuration downloaded successfully')
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setIsDownloading(null)
+    }
+  }
 
   const filtered = users.filter(u =>
     u.username.toLowerCase().includes(search.toLowerCase()) ||
@@ -132,11 +179,12 @@ export default function UsersPage() {
                 <td className="px-5 py-4">
                   <div className="flex items-center justify-end gap-1">
                     <button
-                      onClick={() => toast.info(`Download .ovpn config for ${user.username} coming soon`)}
-                      className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                      onClick={() => handleDownloadConfig(user)}
+                      disabled={isDownloading === user.id}
+                      className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
                       title="Download config"
                     >
-                      <Download className="h-4 w-4" />
+                      <Download className={`h-4 w-4 ${isDownloading === user.id ? 'animate-pulse' : ''}`} />
                     </button>
                     <button
                       onClick={() => { if (confirm('Delete user?')) deleteMutation.mutate(user.id) }}

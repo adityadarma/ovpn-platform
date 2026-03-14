@@ -51,7 +51,7 @@ export default function PoliciesPage() {
       allowedNetwork: form.allowedNetwork,
       action: form.action,
       priority: parseInt(form.priority) || 100,
-      description: form.description || null,
+      description: form.description || undefined,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['policies'] })

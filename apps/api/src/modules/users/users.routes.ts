@@ -89,6 +89,63 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     },
   )
 
+  // GET /api/v1/users/:id/ovpn
+  app.get<{ Params: { id: string }; Querystring: { nodeId?: string } }>(
+    '/users/:id/ovpn',
+    { onRequest: [app.authenticate], schema: { tags: ['users'], summary: 'Download .ovpn config', security: [{ bearerAuth: [] }] } },
+    async (request, reply) => {
+      const { id } = request.params
+      const { nodeId } = request.query
+
+      const user = await app.db('users').where({ id }).first()
+      if (!user) return reply.status(404).send({ error: 'Not Found', message: 'User not found' })
+
+      const authUser = request.user as { id: string; role: string }
+      if (authUser.role !== 'admin' && authUser.id !== id) {
+        return reply.status(403).send({ error: 'Forbidden' })
+      }
+
+      const nodeQuery = app.db('vpn_nodes').where('status', 'online')
+      if (nodeId) nodeQuery.where({ id: nodeId })
+      
+      const node = await nodeQuery.first()
+
+      if (!node) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'No online VPN nodes available' })
+      }
+
+      if (!node.ca_cert || !node.ta_key) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Node has not uploaded certificates yet' })
+      }
+
+      const config = `client
+dev tun
+proto udp
+remote ${node.ip_address} ${node.port}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+cipher AES-256-GCM
+auth-user-pass
+verify-client-cert none
+
+<ca>
+${node.ca_cert.trim()}
+</ca>
+
+<tls-auth>
+${node.ta_key.trim()}
+</tls-auth>
+key-direction 1
+`
+      reply.header('Content-Disposition', `attachment; filename="${user.username}-${node.hostname}.ovpn"`)
+      reply.type('application/x-openvpn-profile')
+      return reply.send(config)
+    },
+  )
+
   // DELETE /api/v1/users/:id
   app.delete<{ Params: { id: string } }>(
     '/users/:id',

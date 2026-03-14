@@ -1,29 +1,37 @@
-# OVPN — VPN Management Platform
+# OVPN — Modern VPN Management Platform
 
-A centralized VPN management platform inspired by Pritunl, Tailscale Admin, and Netmaker — built on top of OpenVPN with a modern tech stack.
+A centralized, open-source VPN management platform inspired by enterprise solutions (like Pritunl and Tailscale Admin). Built around OpenVPN with a modern TypeScript monorepo architecture, it provides a seamless Web UI for provisioning users, managing network access (CIDRs), clustering VPN nodes, and pushing real-time connection policies.
+
+## Key Features
+
+- **Multi-Database Support:** Run securely on SQLite (default/development), PostgreSQL, or MySQL/MariaDB.
+- **Node Clustering:** Deploy multiple OpenVPN server agents globally. The central manager orchestrates them all.
+- **Role-Based Access Control (RBAC):** Admin and User roles.
+- **Network Policies:** Define which VPN users can access which internal IP segments via CIDR-based Allow/Deny routing rules.
+- **Active Session Tracking:** Real-time visibility into who is connected, their virtual IPs, data transferred, and session history via the agent's heartbeat.
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────┐
-│           Manager Server                │
+│           OVPN Manager (Core)           │
 │  ┌──────────┐  ┌──────────────────────┐ │
-│  │  Web UI  │  │    API (Fastify)      │ │
+│  │  Web UI  │  │    API (Fastify)     │ │
 │  │ Next.js  │◄─│  TypeScript + Knex   │ │
 │  └──────────┘  └──────────────────────┘ │
 │                         │               │
 │              ┌──────────┴──────────┐    │
 │              │  Database           │    │
-│              │  postgres/mysql/    │    │
-│              │  sqlite             │    │
+│              │  Postgres/MySQL/    │    │
+│              │  SQLite             │    │
 │              └─────────────────────┘    │
 └────────────────────────┬────────────────┘
-                         │ HTTPS API
+                         │ HTTPS API (JWT / Token Auth)
               ┌──────────┴──────────┐
-              │  VPN Node (agent)   │
+              │  VPN Node (Agent)   │
               │  ┌────────────────┐ │
-              │  │  OVPN Agent     │ │
-              │  │  Node.js       │ │
+              │  │  Node Agent    │ │
+              │  │  (Node.js)     │ │
               │  └────────┬───────┘ │
               │           │         │
               │  ┌────────▼───────┐ │
@@ -34,109 +42,166 @@ A centralized VPN management platform inspired by Pritunl, Tailscale Admin, and 
 
 ## Monorepo Structure
 
-```
+```text
 ovpn-platform/
 ├── apps/
 │   ├── api/        ← Fastify REST API (port 3001)
-│   ├── web/        ← Next.js + ShadCN dashboard (port 3000)
-│   └── agent/      ← VPN node agent (standalone installable)
+│   ├── web/        ← Next.js + ShadCN Dashboard (port 3000)
+│   └── agent/      ← VPN node agent (standalone worker)
 ├── packages/
-│   ├── db/         ← Knex multi-database layer
-│   ├── shared/     ← Types, Zod schemas, constants
-│   └── ui/         ← Shared React components
+│   ├── db/         ← Knex multi-database layer 
+│   ├── shared/     ← Types, Zod schemas, endpoints constants
+│   └── ui/         ← Shared React components (Tailwind CSS)
 ├── docker-compose.yml
 └── .env.example
 ```
 
-## Quick Start
+---
+
+## 🚀 Quick Start (Development)
 
 ### Prerequisites
-- Node.js >= 20
-- pnpm >= 9
+- **Node.js**: >= 20.x
+- **Package Manager**: pnpm >= 9.x
+- (Optional) Docker for running Postgres/MySQL locally.
 
-### Development
+### 1. Installation
 
+Clone the repository and install all monorepo dependencies:
 ```bash
-# 1. Install dependencies
+git clone https://github.com/your-org/ovpn-platform.git
+cd ovpn-platform
 pnpm install
+```
 
-# 2. Copy and configure environment
+### 2. Configuration
+
+Copy the example environment variables:
+```bash
 cp .env.example .env
+```
+By default, the system will use **SQLite** (a local file stored in `data/ovpn.sqlite`) making it incredibly easy to start.
 
-# 3. Run database migrations
+### 3. Database Setup
+
+Run the migrations to create tables, and seed the database with the default admin account:
+```bash
 pnpm db:migrate
-
-# 4. Seed default admin user
 pnpm db:seed
+```
 
-# 5. Start all services
+### 4. Running the Platform
+
+Start both the API server and Web Dashboard in development mode:
+```bash
 pnpm dev
 ```
 
-Services available at:
-- **Web UI**: http://localhost:3000
-- **API**: http://localhost:3001
-- **API Docs**: http://localhost:3001/docs
+**Access Points:**
+- **Web UI:** http://localhost:3000
+- **REST API:** http://localhost:3001
+- **Default Credentials:**
+  - Username: `admin`
+  - Password: `Admin@1234!` *(Force-update recommended immediately after login).*
 
-Default credentials: `admin` / `Admin@1234!` *(change immediately!)*
+---
 
-### Production with Docker
+## 📖 How to Use (Usage Guide)
+
+### Step 1: Login & Dashboard Overview
+1. Open your browser and navigate to `http://localhost:3000`.
+2. Login using the default admin credentials.
+3. The dashboard provides an instant overview of active VPN connections, total users, and online Node Agents.
+
+### Step 2: Create a Network Segment
+Networks define the internal subnets your VPN will route traffic to.
+1. Navigate to **Networks** in the sidebar.
+2. Click **New Network**.
+3. Input a recognizable name (e.g., `Office LAN`) and its CIDR (e.g., `10.0.1.0/24`). 
+4. Click **Add Network**.
+
+### Step 3: Register a VPN Node (Agent)
+A Node is the actual server running OpenVPN.
+1. Navigate to **Nodes** in the sidebar.
+2. Click **Add Node**. Fill in the host details (e.g., `us-east-vpn.company.com`, IP: `198.51.100.2`).
+3. After creation, the system will generate an **Agent Token**. *Save this secret token!* You will use it to configure the Agent application on your actual VPN server.
+
+### Step 4: Manage Users & Groups
+1. Go to **Users**, click **Add User** to generate credentials for your employees/clients. You can optionally assign a static VPN IP address.
+2. Go to **Groups** to create logical collections of users (e.g., `Engineering Team`, `Marketing`). Add the users you created to these groups.
+
+### Step 5: Assign Policies
+Policies define Access Control Lists (ACL).
+1. Navigate to **Policies**.
+2. Create an **Allow** rule for a specific user (or group) tying them to the Network CIDR you created in Step 2.
+3. When the user connects via OpenVPN, the agent automatically pushes these explicit IP routing rules to their client.
+
+---
+
+## 💻 VPN Server Installation (Node Agent)
+
+The "Agent" acts as the middleman between your central Manager API and the local OpenVPN daemon holding the client connections. We provide an automated installation script that will configure OpenVPN natively on your Linux server (Ubuntu, Debian, CentOS, AlmaLinux, RHEL, etc) and set up routing rules automatically.
+
+1. SSH into your actual VPN Server as root.
+2. Clone the repository and run the auto installer:
+   ```bash
+   git clone https://github.com/your-org/ovpn-platform.git
+   cd ovpn-platform
+   chmod +x scripts/server.sh
+   sudo ./scripts/server.sh install
+   ```
+3. Once OpenVPN is installed and running, you must connect it to the central Manager by compiling and running the node agent.
+   ```bash
+   pnpm install
+   pnpm --filter @ovpn/agent build
+   ```
+4. Set the environment variables obtained from **Step 3** of the Web UI usage guide:
+   ```bash
+   export AGENT_MANAGER_URL=https://manager.yourdomain.com
+   export AGENT_NODE_ID=<uuid-generated-for-this-node>
+   export AGENT_SECRET_TOKEN=<the-secret-token>
+   ```
+5. Run the Agent:
+   ```bash
+   node apps/agent/dist/index.js
+   ```
+
+*(For production, we recommend running the agent using `systemd` or `PM2` to ensure it restarts upon failure).*
+
+---
+
+## 🐳 Production Deployment (Docker)
+
+If you wish to run the manager components in an isolated production environment:
 
 ```bash
-# SQLite (simplest, all-in-one)
+# Simplest: SQLite (All-in-one container)
 docker compose up api web -d
 
-# With PostgreSQL
+# High Availability: PostgreSQL backend
 docker compose --profile postgres up -d
 
-# With MariaDB/MySQL
+# Alternative: MySQL/MariaDB backend
 docker compose --profile mysql up -d
 ```
 
-### Agent Installation (on VPN node server)
+## Available Scripts
 
-```bash
-# Clone the repo and build
-git clone https://github.com/your-org/ovpn-platform.git
-cd ovpn-platform && pnpm install && pnpm --filter @ovpn/agent build
+From the root directory, you can utilize Turborepo and pnpm to manage the workspace:
+- `pnpm dev` — Start all apps in watch mode.
+- `pnpm build` — Build all packages and apps for production.
+- `pnpm typecheck` — Run TypeScript compilation checks across the monorepo.
+- `pnpm check` — Run Vitest integration and unit tests.
+- `pnpm db:migrate` — Apply Knex schema migrations.
+- `pnpm db:seed` — Populate database with default starting values.
+- `pnpm db:rollback` — Revert the latest migration batch.
 
-# Set environment variables
-export AGENT_MANAGER_URL=https://your-manager.com
-export AGENT_NODE_ID=<uuid-from-registration>
-export AGENT_SECRET_TOKEN=<token-from-registration>
+---
 
-# Start the agent
-node apps/agent/dist/index.js
-```
+## 📜 License
 
-## Database Support
+[MIT License](LICENSE) 
 
-| Database | Status | Use Case |
-|---|---|---|
-| SQLite | ✅ Default | Development, small deployments |
-| PostgreSQL | ✅ Supported | Production, multi-node |
-| MariaDB/MySQL | ✅ Supported | Production, existing MySQL infra |
+Copyright (c) 2026 Aditya Darma (adhit.boys1@gmail.com)
 
-Set `DATABASE_TYPE` in `.env` to switch databases.
-
-## Development Commands
-
-```bash
-pnpm dev             # Start all apps in watch mode
-pnpm build           # Build all packages and apps
-pnpm typecheck       # TypeScript check across monorepo
-pnpm db:migrate      # Run database migrations
-pnpm db:seed         # Seed default data
-pnpm db:rollback     # Rollback last migration
-```
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| API | Node.js, TypeScript, Fastify 5, Knex.js |
-| Web UI | Next.js 15, React 19, TanStack Query, Zustand |
-| Database | Knex.js + PostgreSQL / MariaDB / SQLite |
-| Agent | Node.js, TypeScript, node-cron |
-| Monorepo | pnpm workspaces, Turborepo |
-| Containers | Docker, docker-compose |
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software.

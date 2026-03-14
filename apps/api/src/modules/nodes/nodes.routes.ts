@@ -56,8 +56,11 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
     '/nodes/heartbeat',
     { schema: { tags: ['nodes'], summary: 'Agent heartbeat' } },
     async (request) => {
-      const { nodeId } = HeartbeatSchema.parse(request.body)
-      await app.db('vpn_nodes').where({ id: nodeId }).update({ status: 'online', last_seen: new Date() })
+      const { nodeId, caCert, taKey } = HeartbeatSchema.parse(request.body)
+      const updates: any = { status: 'online', last_seen: new Date() }
+      if (caCert) updates.ca_cert = caCert
+      if (taKey) updates.ta_key = taKey
+      await app.db('vpn_nodes').where({ id: nodeId }).update(updates)
       return { ok: true }
     },
   )
