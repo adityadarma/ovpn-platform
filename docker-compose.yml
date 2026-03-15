@@ -1,5 +1,5 @@
 services:
-  # ── Databases ────────────────────────────────────────────
+  # ── Databases ──
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ovpn_secret
       POSTGRES_DB: ovpn
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -27,7 +27,7 @@ services:
       MARIADB_DATABASE: ovpn
       MARIADB_ROOT_PASSWORD: root_secret
     volumes:
-      - mariadb_data:/var/lib/mysql
+      - ./data/mariadb:/var/lib/mysql
     ports:
       - "3306:3306"
     healthcheck:
@@ -37,11 +37,9 @@ services:
       retries: 5
     profiles: [ mysql ]
 
-  # ── Manager API ───────────────────────────────────────────
+  # ── Manager API ──
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: ovpn-platform:api
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -67,11 +65,9 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── Web UI ────────────────────────────────────────────────
+  # ── Web UI ──
   web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
+    image: ovpn-platform:web
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:3001}
@@ -81,11 +77,9 @@ services:
       api:
         condition: service_healthy
 
-  # ── VPN Agent (example — typically on a separate server) ──
+  # ── VPN Agent ──
   agent:
-    build:
-      context: .
-      dockerfile: apps/agent/Dockerfile
+    image: ovpn-platform:agent
     restart: unless-stopped
     environment:
       AGENT_MANAGER_URL: ${AGENT_MANAGER_URL:-http://api:3001}
@@ -99,6 +93,4 @@ services:
     profiles: [ agent ]
 
 volumes:
-  postgres_data:
-  mariadb_data:
   api_data:

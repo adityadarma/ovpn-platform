@@ -2,15 +2,18 @@ version: '3.8'
 
 services:
   ovpn-agent:
-    build:
-      context: .
-      dockerfile: apps/agent/Dockerfile
+    image: ovpn-platform:agent
     container_name: ovpn-agent
     restart: unless-stopped
     environment:
       - AGENT_MANAGER_URL=${AGENT_MANAGER_URL}
       - AGENT_NODE_ID=${AGENT_NODE_ID}
       - AGENT_SECRET_TOKEN=${AGENT_SECRET_TOKEN}
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
     volumes:
       # Mount the host's OpenVPN config directory as read-only, so the container can
       # extract `ca.crt` and `ta.key`! (Vital for the config download feature)
