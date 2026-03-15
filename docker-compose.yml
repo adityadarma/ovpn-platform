@@ -1,55 +1,89 @@
+# ============================================================
+# OVPN Platform — Production Docker Compose
+# ============================================================
+# Uses pre-built images from GitHub Container Registry
+#
+# Quick Start:
+#   docker compose pull
+#   docker compose up -d
+#
+# Local Build (if you modify code):
+#   docker compose build
+#   docker compose up -d
+#
+# Database Options:
+#   docker compose up -d                    # SQLite (default)
+#   docker compose --profile postgres up -d # PostgreSQL
+#   docker compose --profile mysql up -d    # MySQL/MariaDB
+#
+# With Agent:
+#   docker compose --profile agent up -d
+# ============================================================
+
 services:
   # ── Databases ──
   postgres:
     image: postgres:16-alpine
+    container_name: ovpn-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ovpn
-      POSTGRES_PASSWORD: ovpn_secret
-      POSTGRES_DB: ovpn
+      POSTGRES_USER: ${POSTGRES_USER:-ovpn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ovpn_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ovpn}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ovpn" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ovpn}" ]
       interval: 10s
       timeout: 5s
       retries: 5
     profiles: [ postgres ]
+    networks:
+      - ovpn-network
 
   mariadb:
     image: mariadb:11
+    container_name: ovpn-mariadb
     restart: unless-stopped
     environment:
-      MARIADB_USER: ovpn
-      MARIADB_PASSWORD: ovpn_secret
-      MARIADB_DATABASE: ovpn
-      MARIADB_ROOT_PASSWORD: root_secret
+      MARIADB_USER: ${MYSQL_USER:-ovpn}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD:-ovpn_secret}
+      MARIADB_DATABASE: ${MYSQL_DATABASE:-ovpn}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_secret}
     volumes:
-      - ./data/mariadb:/var/lib/mysql
+      - mariadb_data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     healthcheck:
       test: [ "CMD", "healthcheck.sh", "--connect", "--innodb_initialized" ]
       interval: 10s
       timeout: 5s
       retries: 5
     profiles: [ mysql ]
+    networks:
+      - ovpn-network
 
   # ── Manager API ──
   api:
-    image: ovpn-platform:api
+    # Pre-built image from GitHub Container Registry
+    image: ghcr.io/adityadarma/ovpn-platform:api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: ovpn-api
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      PORT: 3001
-      JWT_SECRET: ${JWT_SECRET}
+      PORT: ${API_PORT:-3001}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       DATABASE_TYPE: ${DATABASE_TYPE:-sqlite}
       DATABASE_URL: ${DATABASE_URL}
       DATABASE_SQLITE_PATH: /data/ovpn.sqlite
     ports:
-      - "3001:3001"
+      - "${API_PORT:-3001}:${API_PORT:-3001}"
     volumes:
       - api_data:/data
     depends_on:
@@ -60,37 +94,79 @@ services:
         condition: service_healthy
         required: false
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:3001/api/v1/health" ]
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${API_PORT:-3001}/api/v1/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
+    networks:
+      - ovpn-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── Web UI ──
   web:
-    image: ovpn-platform:web
+    # Pre-built image from GitHub Container Registry
+    image: ghcr.io/adityadarma/ovpn-platform:web
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: ovpn-web
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:3001}
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
+    networks:
+      - ovpn-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ── VPN Agent ──
   agent:
-    image: ovpn-platform:agent
+    # Pre-built image from GitHub Container Registry
+    image: ghcr.io/adityadarma/ovpn-platform:agent
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    container_name: ovpn-agent
     restart: unless-stopped
     environment:
-      AGENT_MANAGER_URL: ${AGENT_MANAGER_URL:-http://api:3001}
-      AGENT_NODE_ID: ${AGENT_NODE_ID}
-      AGENT_SECRET_TOKEN: ${AGENT_SECRET_TOKEN}
-    network_mode: host # Needs host networking for iptables access
+      NODE_ENV: production
+      AGENT_MANAGER_URL: ${AGENT_MANAGER_URL:?AGENT_MANAGER_URL is required}
+      AGENT_NODE_ID: ${AGENT_NODE_ID:?AGENT_NODE_ID is required}
+      AGENT_SECRET_TOKEN: ${AGENT_SECRET_TOKEN:?AGENT_SECRET_TOKEN is required}
+      AGENT_POLL_INTERVAL_MS: ${AGENT_POLL_INTERVAL_MS:-5000}
+      AGENT_HEARTBEAT_INTERVAL_MS: ${AGENT_HEARTBEAT_INTERVAL_MS:-30000}
+    network_mode: host
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun
+    volumes:
+      - /etc/openvpn/server:/etc/openvpn/server:ro
     profiles: [ agent ]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  ovpn-network:
+    driver: bridge
 
 volumes:
+  postgres_data:
+  mariadb_data:
   api_data:

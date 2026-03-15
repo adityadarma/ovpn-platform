@@ -1,5 +1,9 @@
 # OVPN — Modern VPN Management Platform
 
+![Build Status](https://github.com/adityadarma/ovpn-platform/actions/workflows/docker-publish.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)
+
 A centralized, open-source VPN management platform inspired by enterprise solutions (like Pritunl and Tailscale Admin). Built around OpenVPN with a modern TypeScript monorepo architecture, it provides a seamless Web UI for provisioning users, managing network access (CIDRs), clustering VPN nodes, and pushing real-time connection policies.
 
 ## Key Features
@@ -69,7 +73,7 @@ ovpn-platform/
 
 Clone the repository and install all monorepo dependencies:
 ```bash
-git clone https://github.com/your-org/ovpn-platform.git
+git clone https://github.com/adityadarma/ovpn-platform.git
 cd ovpn-platform
 pnpm install
 ```
@@ -145,10 +149,10 @@ The "Agent" acts as the middleman between your central Manager API and the local
 1. SSH into your actual VPN Server as root.
 2. Clone the repository and run the auto installer:
    ```bash
-   git clone https://github.com/your-org/ovpn-platform.git
+   git clone https://github.com/adityadarma/ovpn-platform.git
    cd ovpn-platform
-   chmod +x scripts/server.sh
-   sudo ./scripts/server.sh install
+   chmod +x scripts/vpn-server.sh
+   sudo ./scripts/vpn-server.sh install
    ```
 3. Once OpenVPN is installed and running, you must connect it to the central Manager by compiling and running the node agent.
    ```bash
@@ -170,20 +174,44 @@ The "Agent" acts as the middleman between your central Manager API and the local
 
 ---
 
-## 🐳 Production Deployment (Docker)
+## 🐳 Docker Deployment
 
-If you wish to run the manager components in an isolated production environment:
-
+### Development (Local)
 ```bash
-# Simplest: SQLite (All-in-one container)
-docker compose up api web -d
-
-# High Availability: PostgreSQL backend
-docker compose --profile postgres up -d
-
-# Alternative: MySQL/MariaDB backend
-docker compose --profile mysql up -d
+docker compose -f docker-compose.dev.yml up
 ```
+
+### Production
+
+**Option 1: With Repository (Local Build)**
+```bash
+# Clone and build
+git clone https://github.com/adityadarma/ovpn-platform.git
+cd ovpn-platform
+cp .env.example .env
+nano .env  # Configure
+
+# Build and start
+docker compose build
+docker compose up -d
+```
+
+**Option 2: Without Repository (Pre-built Images)** ⭐ Recommended
+```bash
+# One-line install
+curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-platform/main/scripts/install-prod.sh | sudo bash
+
+# Or manual
+wget https://raw.githubusercontent.com/adityadarma/ovpn-platform/main/docker-compose.yml
+wget https://raw.githubusercontent.com/adityadarma/ovpn-platform/main/.env.production -O .env
+nano .env  # Configure JWT_SECRET, etc.
+
+# Pull and start
+docker compose pull
+docker compose up -d
+```
+
+**📚 See [DOCKER.md](DOCKER.md) for complete guide**
 
 ## Available Scripts
 
@@ -195,6 +223,14 @@ From the root directory, you can utilize Turborepo and pnpm to manage the worksp
 - `pnpm db:migrate` — Apply Knex schema migrations.
 - `pnpm db:seed` — Populate database with default starting values.
 - `pnpm db:rollback` — Revert the latest migration batch.
+
+---
+
+## 📚 Documentation
+
+- **[README.md](README.md)** - Project overview and quick start
+- **[DOCKER.md](DOCKER.md)** - Docker deployment guide (dev & production)
+- **[PRODUCTION-INSTALL.md](PRODUCTION-INSTALL.md)** - Production installation guide
 
 ---
 

@@ -1,0 +1,201 @@
+#!/bin/bash
+# ============================================================
+# OVPN Platform - Production Uninstallation Script
+# ============================================================
+# This script removes OVPN Platform installation
+# Usage: sudo bash /opt/ovpn-platform/scripts/uninstall-prod.sh
+# ============================================================
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+INSTALL_DIR="/opt/ovpn-platform"
+
+print_header() {
+    echo -e "${RED}"
+    echo "============================================================"
+    echo "  OVPN Platform - Uninstallation"
+    echo "============================================================"
+    echo -e "${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+print_info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        print_error "This script must be run as root"
+        exit 1
+    fi
+}
+
+confirm_uninstall() {
+    echo ""
+    print_warning "This will remove OVPN Platform and optionally delete all data!"
+    echo ""
+    read -p "Are you sure you want to continue? (yes/no): " confirm
+    
+    if [ "$confirm" != "yes" ]; then
+        print_info "Uninstallation cancelled"
+        exit 0
+    fi
+}
+
+stop_services() {
+    print_info "Stopping services..."
+    
+    if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+        cd "$INSTALL_DIR"
+        docker compose down || true
+        print_success "Services stopped"
+    else
+        print_warning "docker-compose.yml not found, skipping service stop"
+    fi
+}
+
+remove_volumes() {
+    echo ""
+    read -p "Do you want to delete all data (databases, volumes)? (yes/no): " delete_data
+    
+    if [ "$delete_data" = "yes" ]; then
+        print_info "Removing Docker volumes..."
+        
+        docker volume rm ovpn_api_data 2>/dev/null || true
+        docker volume rm ovpn_postgres_data 2>/dev/null || true
+        docker volume rm ovpn_mariadb_data 2>/dev/null || true
+        
+        print_success "Volumes removed"
+    else
+        print_info "Keeping data volumes (can be removed manually later)"
+    fi
+}
+
+remove_images() {
+    echo ""
+    read -p "Do you want to remove Docker images? (yes/no): " remove_imgs
+    
+    if [ "$remove_imgs" = "yes" ]; then
+        print_info "Removing Docker images..."
+        
+        docker rmi $(docker images | grep ovpn-platform | awk '{print $3}') 2>/dev/null || true
+        
+        print_success "Images removed"
+    else
+        print_info "Keeping Docker images"
+    fi
+}
+
+backup_before_remove() {
+    echo ""
+    read -p "Do you want to create a backup before uninstalling? (yes/no): " create_backup
+    
+    if [ "$create_backup" = "yes" ]; then
+        if [ -f "$INSTALL_DIR/backup.sh" ]; then
+            print_info "Creating backup..."
+            bash "$INSTALL_DIR/backup.sh"
+            print_success "Backup created in /opt/ovpn-backups"
+        else
+            print_warning "Backup script not found"
+        fi
+    fi
+}
+
+remove_install_dir() {
+    echo ""
+    read -p "Do you want to remove installation directory ($INSTALL_DIR)? (yes/no): " remove_dir
+    
+    if [ "$remove_dir" = "yes" ]; then
+        print_info "Removing installation directory..."
+        rm -rf "$INSTALL_DIR"
+        print_success "Installation directory removed"
+    else
+        print_info "Keeping installation directory"
+    fi
+}
+
+remove_cron_jobs() {
+    print_info "Checking for cron jobs..."
+    
+    if crontab -l 2>/dev/null | grep -q "ovpn"; then
+        print_warning "Found OVPN-related cron jobs"
+        echo ""
+        crontab -l | grep "ovpn"
+        echo ""
+        read -p "Remove these cron jobs? (yes/no): " remove_cron
+        
+        if [ "$remove_cron" = "yes" ]; then
+            crontab -l | grep -v "ovpn" | crontab -
+            print_success "Cron jobs removed"
+        fi
+    else
+        print_info "No cron jobs found"
+    fi
+}
+
+print_summary() {
+    echo ""
+    echo -e "${GREEN}"
+    echo "============================================================"
+    echo "  Uninstallation Complete!"
+    echo "============================================================"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${BLUE}What was removed:${NC}"
+    echo "  - Docker containers stopped"
+    
+    if [ "$delete_data" = "yes" ]; then
+        echo "  - Data volumes deleted"
+    fi
+    
+    if [ "$remove_imgs" = "yes" ]; then
+        echo "  - Docker images removed"
+    fi
+    
+    if [ "$remove_dir" = "yes" ]; then
+        echo "  - Installation directory removed"
+    fi
+    
+    echo ""
+    echo -e "${BLUE}Manual cleanup (if needed):${NC}"
+    echo "  - Backups: /opt/ovpn-backups"
+    echo "  - Nginx config: /etc/nginx/sites-available/ovpn"
+    echo "  - SSL certificates: /etc/letsencrypt/live/yourdomain.com"
+    echo ""
+    echo -e "${BLUE}To reinstall:${NC}"
+    echo "  curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-platform/main/scripts/install-prod.sh | sudo bash"
+    echo ""
+}
+
+main() {
+    print_header
+    check_root
+    confirm_uninstall
+    backup_before_remove
+    stop_services
+    remove_volumes
+    remove_images
+    remove_cron_jobs
+    remove_install_dir
+    print_summary
+}
+
+main
