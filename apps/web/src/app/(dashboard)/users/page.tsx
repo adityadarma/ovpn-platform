@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, API_URL } from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
 import { Trash2, Download, Shield, Search, X, Plus } from 'lucide-react'
 import type { User } from '@ovpn/shared'
@@ -56,9 +56,8 @@ export default function UsersPage() {
     try {
       setIsDownloading(user.id)
       const token = useAuthStore.getState().token
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
       
-      const res = await fetch(`${apiUrl}/api/v1/users/${user.id}/ovpn`, {
+      const res = await fetch(`${API_URL}/api/v1/users/${user.id}/ovpn`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       
