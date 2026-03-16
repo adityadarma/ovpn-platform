@@ -12,12 +12,41 @@ export async function checkAndRenewCertificates(db: Knex): Promise<RenewalResult
 
   try {
     // Find users with auto-renewal enabled and certificates expiring soon
-    const usersToRenew = await db('users')
+    // Database-agnostic date calculation
+    const dbClient = db.client.config.client
+    const now = new Date().toISOString()
+    
+    let query = db('users')
       .where('cert_auto_renew', true)
       .whereNotNull('cert_expires_at')
-      .whereRaw('cert_expires_at <= DATE_ADD(NOW(), INTERVAL cert_renew_days_before DAY)')
-      .where('cert_expires_at', '>', new Date())
-      .select('id', 'username', 'cert_expires_at', 'cert_renew_days_before', 'cert_password_protected')
+      .where('cert_expires_at', '>', now)
+    
+    // Add database-specific date comparison
+    if (dbClient === 'sqlite3' || dbClient === 'better-sqlite3') {
+      // SQLite: datetime('now', '+X days')
+      query = query.whereRaw(`datetime(cert_expires_at) <= datetime('now', '+' || CAST(cert_renew_days_before AS TEXT) || ' days')`)
+    } else if (dbClient === 'mysql' || dbClient === 'mysql2') {
+      // MySQL/MariaDB: DATE_ADD(NOW(), INTERVAL X DAY)
+      query = query.whereRaw(`cert_expires_at <= DATE_ADD(NOW(), INTERVAL cert_renew_days_before DAY)`)
+    } else if (dbClient === 'pg') {
+      // PostgreSQL: NOW() + INTERVAL 'X days'
+      query = query.whereRaw(`cert_expires_at <= NOW() + (cert_renew_days_before || ' days')::INTERVAL`)
+    } else {
+      // Fallback: manual calculation in JavaScript
+      console.warn(`[cert-renewal] Unknown database client: ${dbClient}, using fallback method`)
+    }
+    
+    let usersToRenew = await query.select('id', 'username', 'cert_expires_at', 'cert_renew_days_before', 'cert_password_protected')
+    
+    // If using fallback method, filter in JavaScript
+    if (dbClient !== 'sqlite3' && dbClient !== 'better-sqlite3' && dbClient !== 'mysql' && dbClient !== 'mysql2' && dbClient !== 'pg') {
+      usersToRenew = usersToRenew.filter(user => {
+        const expiresAt = new Date(user.cert_expires_at)
+        const renewBefore = new Date()
+        renewBefore.setDate(renewBefore.getDate() + (user.cert_renew_days_before || 30))
+        return expiresAt <= renewBefore
+      })
+    }
 
     console.log(`[cert-renewal] Found ${usersToRenew.length} users needing certificate renewal`)
 
