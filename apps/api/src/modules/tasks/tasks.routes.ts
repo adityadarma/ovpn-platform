@@ -27,10 +27,15 @@ const taskRoutes: FastifyPluginAsync = async (app) => {
     { schema: { tags: ['tasks'], summary: 'Report task result (agent)' } },
     async (request, reply) => {
       const { id } = request.params
+      app.log.info(`[tasks] Received result for task ${id}`)
+      
       const input = TaskResultSchema.parse(request.body)
 
       const task = await app.db('tasks').where({ id }).first()
-      if (!task) return reply.status(404).send({ error: 'Not Found', message: 'Task not found' })
+      if (!task) {
+        app.log.warn(`[tasks] Task ${id} not found`)
+        return reply.status(404).send({ error: 'Not Found', message: 'Task not found' })
+      }
 
       await app.db('tasks').where({ id }).update({
         status: input.status === 'success' ? 'done' : 'failed',
@@ -39,6 +44,7 @@ const taskRoutes: FastifyPluginAsync = async (app) => {
         completed_at: new Date(),
       })
 
+      app.log.info(`[tasks] Task ${id} updated to ${input.status}`)
       return { ok: true }
     },
   )

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Added detailed logging for agent task result reporting to diagnose certificate generation timeout issues
+- Added logging in API task result endpoint to track incoming agent requests
+
 ### Added
 
 #### VPN Configuration Sync System

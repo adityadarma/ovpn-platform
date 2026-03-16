@@ -50,7 +50,10 @@ export async function executeTask(env: AgentEnv, task: Task): Promise<void> {
 
   // Report result back to manager
   try {
-    await fetch(`${env.AGENT_MANAGER_URL}/api/v1/tasks/${task.id}/result`, {
+    const reportUrl = `${env.AGENT_MANAGER_URL}/api/v1/tasks/${task.id}/result`
+    console.log(`[executor] Reporting result to: ${reportUrl}`)
+    
+    const response = await fetch(reportUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${env.AGENT_SECRET_TOKEN}`,
@@ -58,6 +61,13 @@ export async function executeTask(env: AgentEnv, task: Task): Promise<void> {
       },
       body: JSON.stringify({ status, result, errorMessage }),
     })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`[executor] Failed to report result: HTTP ${response.status} - ${errorText}`)
+    } else {
+      console.log(`[executor] ✓ Task result reported successfully`)
+    }
   } catch (err) {
     console.error(`[executor] Failed to report result for task ${task.id}:`, (err as Error).message)
   }
