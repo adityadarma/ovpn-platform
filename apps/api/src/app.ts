@@ -32,7 +32,7 @@ export async function buildApp(env: Env) {
 
   const app = Fastify({
     logger: {
-      level: env.NODE_ENV === 'development' ? 'info' : 'info', // Changed from 'warn' to 'info' for better debugging
+      level: env.NODE_ENV === 'development' ? 'info' : 'warn',
     },
   })
 

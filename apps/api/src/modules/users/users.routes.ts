@@ -168,7 +168,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       while (Date.now() - startTime < maxWait) {
         const task = await app.db('tasks').where({ id: taskId }).first()
         
-        if (task.status === 'success') {
+        if (task.status === 'done') {
           const result = JSON.parse(task.result || '{}')
           
           // Save certificate to user record
