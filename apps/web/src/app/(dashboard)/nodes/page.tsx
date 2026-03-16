@@ -494,7 +494,7 @@ export default function NodesPage() {
                   type="text"
                   value={nodeConfig.dns_servers}
                   onChange={e => setNodeConfig({ ...nodeConfig, dns_servers: e.target.value })}
-                  placeholder="8.8.8.8,8.8.4.4"
+                  placeholder="8.8.8.8,1.1.1.1"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
                 <p className="text-xs text-gray-400 mt-1">Comma-separated DNS server IPs</p>

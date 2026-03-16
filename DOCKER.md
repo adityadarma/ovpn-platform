@@ -274,9 +274,31 @@ curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-manager/main/scrip
 This will:
 1. Install Docker (if not present)
 2. Install OpenVPN server (if not present)
-3. Prompt for Node ID and Secret Token
+3. **Auto-register node** (optional) or use manual registration
 4. Configure and start the agent
 5. Set up systemd service for auto-start
+
+#### Auto-Registration Options
+
+During installation, you can choose to auto-register the node:
+
+**Option 1: Using Registration Key** (Recommended)
+- Set `NODE_REGISTRATION_KEY` in Manager's `.env` file
+- Generate with: `openssl rand -hex 32`
+- Provide this key during agent installation
+- More secure than sharing admin credentials
+
+**Option 2: Using Admin JWT Token**
+- Login to Manager Web UI as admin
+- Open browser DevTools (F12) → Application → Local Storage
+- Copy the `token` value
+- Provide this token during agent installation
+- Token expires based on `JWT_EXPIRES_IN` setting
+
+**Option 3: Manual Registration**
+- Register node via Web UI first
+- Get Node ID and Secret Token
+- Provide these during agent installation
 
 **Management Commands:**
 ```bash

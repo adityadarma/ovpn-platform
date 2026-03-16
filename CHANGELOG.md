@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### VPN Configuration Sync System
+- **Install Script Config Persistence**: VPN server installation now saves configuration to JSON file
+  - Config saved to `/etc/openvpn/server/install-config.json`
+  - Includes all settings: port, protocol, tunnel mode, network, DNS, cipher, etc.
+  - Also saved in text format for easy reading
+- **Auto-Sync on Registration**: Configuration automatically synced to database when node registers
+  - Install script reads saved config and sends to API
+  - Database stores actual VPN server configuration
+  - Web UI displays real configuration from server
+- **Default Tunnel Mode Changed**: Split tunnel is now the default (was full tunnel)
+  - Better performance for most use cases
+  - Only routes specific networks through VPN
+  - Full tunnel still available as option
+- **Configuration Consistency**: Ensures database matches actual VPN server settings
+  - No more mismatch between install config and database
+  - Admin can see actual server configuration in Web UI
+  - Updates from Web UI still work as before
+
+#### Node Auto-Registration System
+- **Secure Auto-Registration**: VPN nodes can now auto-register with the Manager API
+  - Two authentication methods: Registration Key or Admin JWT Token
+  - Registration Key method (recommended): Set `NODE_REGISTRATION_KEY` in `.env`
+  - Admin JWT Token method: Use admin token from browser
+  - Prevents unauthorized node registration
+- **Enhanced Install Script**: `install-agent.sh` now supports auto-registration
+  - Interactive prompts for hostname, IP, and region
+  - Automatic API call to register node
+  - Falls back to manual registration if auto-registration fails
+- **API Security**: Updated `/api/v1/nodes/register` endpoint
+  - Requires either admin JWT token or valid registration key
+  - Validates hostname and IP uniqueness
+  - Returns error if authentication fails
+- **Environment Configuration**: Added `NODE_REGISTRATION_KEY` to `.env.example` and `.env.production`
+
 #### Certificate Management System
 - **Client Certificate Generation**: Generate certificates for VPN users with customizable validity periods
   - Validity options: 1 day, 1 week, 2 weeks, 1 month, 3 months, 6 months, 1 year, or unlimited

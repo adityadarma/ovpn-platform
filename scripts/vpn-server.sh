@@ -54,15 +54,15 @@ if [ "$ACTION" == "install" ]; then
     # Tunnel mode configuration
     echo ""
     echo "Select tunnel mode:"
-    echo "1) Full Tunnel - Route all traffic through VPN (recommended for security)"
-    echo "2) Split Tunnel - Only route specific networks through VPN (better performance)"
+    echo "1) Split Tunnel - Only route specific networks through VPN (recommended - better performance)"
+    echo "2) Full Tunnel - Route all traffic through VPN (maximum security)"
     read -p "Enter choice [1-2] (default: 1): " TUNNEL_CHOICE
     TUNNEL_CHOICE=${TUNNEL_CHOICE:-1}
     
     if [ "$TUNNEL_CHOICE" == "2" ]; then
-        TUNNEL_MODE="split"
-    else
         TUNNEL_MODE="full"
+    else
+        TUNNEL_MODE="split"
     fi
     
     # VPN network configuration
@@ -212,7 +212,29 @@ log /var/log/openvpn.log
 verb 3
 EOF
 
-    # Save configuration for reference
+    # Save configuration for reference and agent sync
+    cat <<EOF > /etc/openvpn/server/install-config.json
+{
+  "port": $VPN_PORT,
+  "protocol": "$VPN_PROTOCOL",
+  "tunnel_mode": "$TUNNEL_MODE",
+  "vpn_network": "$VPN_NET",
+  "vpn_netmask": "$VPN_MASK",
+  "dns_servers": "8.8.8.8,1.1.1.1",
+  "push_routes": "",
+  "cipher": "AES-256-GCM",
+  "auth_digest": "SHA256",
+  "compression": "lz4-v2",
+  "keepalive_ping": 10,
+  "keepalive_timeout": 120,
+  "max_clients": 100,
+  "primary_interface": "$PRIMARY_IF",
+  "public_ip": "$PUBLIC_IP",
+  "installed_at": "$(date -Iseconds)"
+}
+EOF
+
+    # Also save in text format for easy reading
     cat <<EOF > /etc/openvpn/server/install-config.txt
 VPN_PORT=$VPN_PORT
 VPN_PROTOCOL=$VPN_PROTOCOL
@@ -223,6 +245,9 @@ PRIMARY_IF=$PRIMARY_IF
 PUBLIC_IP=$PUBLIC_IP
 INSTALLED_AT=$(date)
 EOF
+
+    chmod 644 /etc/openvpn/server/install-config.json
+    chmod 644 /etc/openvpn/server/install-config.txt
 
     echo "================================="
     echo "Configuring Networking (NAT & Forwarding)"

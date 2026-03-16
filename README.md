@@ -163,6 +163,7 @@ The "Agent" acts as the middleman between your central Manager API and the local
 This is the easiest way to deploy an agent on a VPN node. It will:
 - Install Docker (if not present)
 - Install OpenVPN server (if not present)
+- Auto-register node (optional) or use manual registration
 - Configure and start the agent in a Docker container
 - Set up systemd service for auto-start
 
@@ -171,10 +172,25 @@ This is the easiest way to deploy an agent on a VPN node. It will:
 curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-manager/main/scripts/install-agent.sh | sudo bash
 ```
 
-**Prerequisites:**
-1. Register the node in Manager Web UI first (Nodes → Add Node)
-2. Copy the Node ID and Secret Token
-3. Run the installer and provide the credentials when prompted
+**Registration Options:**
+
+During installation, choose one of these methods:
+
+1. **Auto-register with Registration Key** (Recommended)
+   - Set `NODE_REGISTRATION_KEY` in Manager's `.env` (generate with `openssl rand -hex 32`)
+   - Provide the key during installation
+   - Most secure method for production
+
+2. **Auto-register with Admin JWT Token**
+   - Login to Manager Web UI as admin
+   - Copy JWT token from browser (DevTools → Local Storage)
+   - Provide token during installation
+   - Token expires based on `JWT_EXPIRES_IN` setting
+
+3. **Manual Registration**
+   - Register node in Manager Web UI first (Nodes → Add Node)
+   - Copy Node ID and Secret Token
+   - Provide credentials during installation
 
 **Management Commands:**
 ```bash

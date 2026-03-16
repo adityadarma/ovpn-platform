@@ -77,6 +77,25 @@ Copy the output and set it in `.env`:
 JWT_SECRET=your_generated_secret_here
 ```
 
+**2. Generate Node Registration Key (Recommended for Security):**
+
+This key allows VPN nodes to auto-register securely:
+
+```bash
+# Generate registration key
+openssl rand -hex 32
+```
+
+Copy the output and set it in `.env`:
+```env
+NODE_REGISTRATION_KEY=your_generated_registration_key_here
+```
+
+**Security Note:** 
+- If `NODE_REGISTRATION_KEY` is set, nodes can auto-register using this key
+- If not set, only admin users with JWT token can register nodes
+- Keep this key secret and share only with authorized node administrators
+
 **2. Choose Database Type:**
 
 For SQLite (simplest, default):
@@ -195,11 +214,50 @@ http://your-server-ip:3000
 
 ### 1. Register VPN Nodes
 
+You have two options to register VPN nodes:
+
+#### Option A: Auto-Registration (Recommended) ⭐
+
+The agent installer can automatically register the node with the Manager API.
+
+**Prerequisites:**
+- Set `NODE_REGISTRATION_KEY` in Manager's `.env` file
+- Or have an admin JWT token ready
+
+**Installation:**
+```bash
+# On the VPN server, run the installer
+curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-manager/main/scripts/install-agent.sh | sudo bash
+```
+
+During installation:
+1. Choose "Auto-register" option
+2. Enter Manager API URL
+3. Provide either:
+   - **Registration Key** (from `NODE_REGISTRATION_KEY` in Manager's `.env`)
+   - **Admin JWT Token** (from browser after login)
+4. Enter hostname, IP address, and region
+5. Node will be automatically registered and started
+
+**Security:**
+- Registration key method: Share the key only with authorized administrators
+- JWT token method: Token expires based on `JWT_EXPIRES_IN` setting (default: 7 days)
+
+#### Option B: Manual Registration
+
 1. Navigate to **Nodes** in the sidebar
 2. Click **Add Node**
 3. Fill in node details (hostname, IP address, region)
 4. Save the **Node ID** and **Secret Token** (shown only once!)
-5. Use these credentials to deploy the agent on your VPN server
+5. Use these credentials when installing the agent on your VPN server
+
+**Manual Agent Installation:**
+```bash
+# On the VPN server
+curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-manager/main/scripts/install-agent.sh | sudo bash
+
+# Choose "Manual registration" and provide Node ID and Secret Token
+```
 
 ### 2. Configure Node Settings
 

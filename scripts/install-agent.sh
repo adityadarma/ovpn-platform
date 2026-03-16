@@ -126,6 +126,94 @@ download_files() {
     fi
 }
 
+auto_register_node() {
+    local manager_url=$1
+    local hostname=$2
+    local ip_address=$3
+    local region=$4
+    local auth_method=$5
+    local auth_value=$6
+    
+    print_info "Attempting auto-registration..."
+    
+    # Read VPN server config if exists
+    local vpn_config=""
+    if [ -f "/etc/openvpn/server/install-config.json" ]; then
+        print_info "Found VPN server configuration, will sync to database..."
+        vpn_config=$(cat /etc/openvpn/server/install-config.json)
+    fi
+    
+    local response
+    local http_code
+    
+    # Prepare JSON payload
+    local json_payload
+    if [ -n "$vpn_config" ]; then
+        # Merge node info with VPN config
+        json_payload=$(cat <<EOF
+{
+  "hostname": "$hostname",
+  "ip": "$ip_address",
+  "region": "$region",
+  "version": "auto-registered",
+  "registrationKey": "$auth_value",
+  "config": $vpn_config
+}
+EOF
+)
+    else
+        # No VPN config, use defaults
+        json_payload=$(cat <<EOF
+{
+  "hostname": "$hostname",
+  "ip": "$ip_address",
+  "port": 1194,
+  "region": "$region",
+  "version": "auto-registered",
+  "registrationKey": "$auth_value"
+}
+EOF
+)
+    fi
+    
+    # Make API call
+    if [ "$auth_method" == "jwt" ]; then
+        response=$(curl -s -w "\n%{http_code}" -X POST "$manager_url/api/v1/nodes/register" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $auth_value" \
+            -d "$json_payload" 2>&1)
+    else
+        response=$(curl -s -w "\n%{http_code}" -X POST "$manager_url/api/v1/nodes/register" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload" 2>&1)
+    fi
+    
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+    
+    if [ "$http_code" == "201" ]; then
+        # Parse response
+        NODE_ID=$(echo "$body" | grep -o '"id":"[^"]*' | cut -d'"' -f4)
+        SECRET_TOKEN=$(echo "$body" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+        
+        if [ -n "$NODE_ID" ] && [ -n "$SECRET_TOKEN" ]; then
+            print_success "Node registered successfully!"
+            print_success "Node ID: $NODE_ID"
+            if [ -n "$vpn_config" ]; then
+                print_success "VPN configuration synced to database"
+            fi
+            return 0
+        else
+            print_error "Failed to parse registration response"
+            return 1
+        fi
+    else
+        print_error "Registration failed (HTTP $http_code)"
+        echo "$body" | grep -o '"message":"[^"]*' | cut -d'"' -f4
+        return 1
+    fi
+}
+
 configure_env() {
     print_info "Configuring environment variables..."
     
@@ -133,11 +221,6 @@ configure_env() {
     echo "============================================================"
     echo "  Agent Configuration"
     echo "============================================================"
-    echo ""
-    echo "You need to register this node in the OpenVPN Manager Web UI first."
-    echo "After registration, you will receive:"
-    echo "  - Node ID"
-    echo "  - Secret Token"
     echo ""
     
     # Get Manager URL
@@ -147,25 +230,100 @@ configure_env() {
         read -p "Enter Manager API URL: " MANAGER_URL </dev/tty
     done
     
-    # Get Node ID
+    # Check if auto-registration is available
     echo ""
-    print_info "To get Node ID and Secret Token:"
-    print_info "1. Go to Manager Web UI → Nodes → Add Node"
-    print_info "2. Fill in node details and click 'Register'"
-    print_info "3. Copy the Node ID and Secret Token"
+    print_info "Registration Options:"
+    echo "  1. Auto-register (requires Admin JWT token or Registration Key)"
+    echo "  2. Manual registration (use existing Node ID and Secret Token)"
     echo ""
+    read -p "Choose registration method [1/2] (default: 2): " REG_METHOD </dev/tty
+    REG_METHOD=${REG_METHOD:-2}
     
-    read -p "Enter Node ID: " NODE_ID </dev/tty
-    while [ -z "$NODE_ID" ]; do
-        print_error "Node ID is required"
+    if [ "$REG_METHOD" == "1" ]; then
+        # Auto-registration
+        echo ""
+        print_info "Auto-Registration Setup"
+        echo ""
+        
+        # Get hostname
+        DEFAULT_HOSTNAME=$(hostname)
+        read -p "Enter hostname (default: $DEFAULT_HOSTNAME): " HOSTNAME </dev/tty
+        HOSTNAME=${HOSTNAME:-$DEFAULT_HOSTNAME}
+        
+        # Get IP address
+        DEFAULT_IP=$(hostname -I | awk '{print $1}')
+        read -p "Enter public IP address (default: $DEFAULT_IP): " IP_ADDRESS </dev/tty
+        IP_ADDRESS=${IP_ADDRESS:-$DEFAULT_IP}
+        
+        # Get region (optional)
+        read -p "Enter region/location (optional, e.g., Singapore, US-East): " REGION </dev/tty
+        
+        # Choose auth method
+        echo ""
+        print_info "Authentication Method:"
+        echo "  1. Admin JWT Token (login to Web UI first, copy token from browser)"
+        echo "  2. Registration Key (from NODE_REGISTRATION_KEY in .env)"
+        echo ""
+        read -p "Choose auth method [1/2]: " AUTH_METHOD </dev/tty
+        
+        if [ "$AUTH_METHOD" == "1" ]; then
+            echo ""
+            print_info "To get Admin JWT Token:"
+            print_info "1. Login to Manager Web UI as admin"
+            print_info "2. Open browser DevTools (F12) → Application/Storage → Local Storage"
+            print_info "3. Copy the 'token' value"
+            echo ""
+            read -p "Enter Admin JWT Token: " JWT_TOKEN </dev/tty
+            while [ -z "$JWT_TOKEN" ]; do
+                print_error "JWT Token is required"
+                read -p "Enter Admin JWT Token: " JWT_TOKEN </dev/tty
+            done
+            
+            if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "jwt" "$JWT_TOKEN"; then
+                print_success "Auto-registration successful!"
+            else
+                print_error "Auto-registration failed. Falling back to manual registration."
+                REG_METHOD=2
+            fi
+        else
+            echo ""
+            read -p "Enter Registration Key (from NODE_REGISTRATION_KEY): " REG_KEY </dev/tty
+            while [ -z "$REG_KEY" ]; do
+                print_error "Registration Key is required"
+                read -p "Enter Registration Key: " REG_KEY </dev/tty
+            done
+            
+            if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "key" "$REG_KEY"; then
+                print_success "Auto-registration successful!"
+            else
+                print_error "Auto-registration failed. Falling back to manual registration."
+                REG_METHOD=2
+            fi
+        fi
+    fi
+    
+    # Manual registration (or fallback from failed auto-registration)
+    if [ "$REG_METHOD" == "2" ] || [ -z "$NODE_ID" ] || [ -z "$SECRET_TOKEN" ]; then
+        echo ""
+        print_info "Manual Registration"
+        print_info "To get Node ID and Secret Token:"
+        print_info "1. Go to Manager Web UI → Nodes → Add Node"
+        print_info "2. Fill in node details and click 'Register'"
+        print_info "3. Copy the Node ID and Secret Token"
+        echo ""
+        
         read -p "Enter Node ID: " NODE_ID </dev/tty
-    done
-    
-    read -p "Enter Secret Token: " SECRET_TOKEN </dev/tty
-    while [ -z "$SECRET_TOKEN" ]; do
-        print_error "Secret Token is required"
+        while [ -z "$NODE_ID" ]; do
+            print_error "Node ID is required"
+            read -p "Enter Node ID: " NODE_ID </dev/tty
+        done
+        
         read -p "Enter Secret Token: " SECRET_TOKEN </dev/tty
-    done
+        while [ -z "$SECRET_TOKEN" ]; do
+            print_error "Secret Token is required"
+            read -p "Enter Secret Token: " SECRET_TOKEN </dev/tty
+        done
+    fi
     
     # Optional: Poll and Heartbeat intervals
     read -p "Poll interval in milliseconds (default: 5000): " POLL_INTERVAL </dev/tty

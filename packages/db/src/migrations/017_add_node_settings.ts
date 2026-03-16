@@ -9,7 +9,7 @@ export async function up(knex: Knex): Promise<void> {
     // Network settings
     table.string('vpn_network', 18).defaultTo('10.8.0.0').comment('VPN network address')
     table.string('vpn_netmask', 15).defaultTo('255.255.255.0').comment('VPN network mask')
-    table.string('dns_servers', 500).defaultTo('8.8.8.8,8.8.4.4').comment('DNS servers (comma-separated)')
+    table.string('dns_servers', 500).defaultTo('8.8.8.8,1.1.1.1').comment('DNS servers (comma-separated)')
     table.text('push_routes').nullable().comment('Custom routes for split tunnel (comma-separated)')
     
     // Security settings
