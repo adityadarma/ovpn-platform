@@ -191,7 +191,69 @@ http://your-server-ip:3000
 
 ---
 
-## 🔒 Step 6: Secure Your Installation (Recommended)
+## 📋 Step 6: Initial Configuration
+
+### 1. Register VPN Nodes
+
+1. Navigate to **Nodes** in the sidebar
+2. Click **Add Node**
+3. Fill in node details (hostname, IP address, region)
+4. Save the **Node ID** and **Secret Token** (shown only once!)
+5. Use these credentials to deploy the agent on your VPN server
+
+### 2. Configure Node Settings
+
+After registering a node, you can customize its VPN configuration:
+
+1. Click the **Configure** button (⚙️) on the node card
+2. Adjust settings:
+   - **Port & Protocol**: UDP (faster) or TCP (more reliable)
+   - **Tunnel Mode**: Full tunnel (all traffic) or Split tunnel (specific routes)
+   - **VPN Network**: Internal VPN subnet (e.g., 10.8.0.0/24)
+   - **DNS Servers**: Custom DNS for VPN clients
+   - **Encryption**: Cipher (AES-256-GCM recommended) and auth digest
+   - **Compression**: LZ4-v2 for better performance
+   - **Connection**: Keepalive and max clients settings
+
+3. Click **Update Configuration** - changes will be applied to the VPN server automatically
+
+### 3. Generate Client Certificates
+
+For each user that needs VPN access:
+
+1. Navigate to **Users**
+2. Click **Generate Certificate** button for a user
+3. Select the VPN node
+4. Choose certificate validity:
+   - **Unlimited**: Never expires (for permanent access)
+   - **1 Day to 1 Year**: For temporary or time-limited access
+5. Optionally enable **Password Protection** for the private key
+6. Click **Generate**
+
+**Certificate Features:**
+- **Auto-Renewal**: Enable automatic renewal before expiration
+- **Bulk Generation**: Generate certificates for multiple users at once
+- **Download History**: Track when and where certificates were downloaded
+- **Revocation**: Revoke compromised certificates instantly
+
+### 4. Download VPN Configuration
+
+After generating a certificate:
+
+1. Click **Download .ovpn** button for the user
+2. Send the `.ovpn` file to the user securely
+3. User imports the file into their OpenVPN client
+
+**Supported Clients:**
+- **Windows**: OpenVPN GUI
+- **macOS**: Tunnelblick, OpenVPN Connect
+- **Linux**: OpenVPN CLI, NetworkManager
+- **Android**: OpenVPN for Android
+- **iOS**: OpenVPN Connect
+
+---
+
+## 🔒 Step 7: Secure Your Installation (Recommended)
 
 ### 1. Set Up SSL/TLS with Nginx
 

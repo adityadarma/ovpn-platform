@@ -263,11 +263,49 @@ MYSQL_ROOT_PASSWORD=YOUR_ROOT_PASSWORD
 
 The VPN Agent runs on your VPN server node and communicates with the Manager API.
 
-### Step 1: Install OpenVPN Server
+### Quick Install (Recommended) ⭐
+
+Use our automated installer that handles everything:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/ovpn-manager/main/scripts/install-agent.sh | sudo bash
+```
+
+This will:
+1. Install Docker (if not present)
+2. Install OpenVPN server (if not present)
+3. Prompt for Node ID and Secret Token
+4. Configure and start the agent
+5. Set up systemd service for auto-start
+
+**Management Commands:**
+```bash
+# Start agent
+systemctl start ovpn-agent
+# or
+/opt/ovpn-agent/start.sh
+
+# Stop agent
+systemctl stop ovpn-agent
+# or
+/opt/ovpn-agent/stop.sh
+
+# View logs
+/opt/ovpn-agent/logs.sh
+
+# Check status
+/opt/ovpn-agent/status.sh
+```
+
+---
+
+### Manual Installation
+
+#### Step 1: Install OpenVPN Server
 
 First, install OpenVPN on your VPN server using our automated script:
 
-#### Option A: One-Line Install (Recommended)
+**Option A: One-Line Install**
 
 ```bash
 # Download and run the VPN server installer
@@ -276,7 +314,13 @@ chmod +x vpn-server.sh
 sudo ./vpn-server.sh install
 ```
 
-#### Option B: Manual Install (With Repository)
+During installation, you'll be prompted to configure:
+- **Port**: Default 1194 (or custom)
+- **Protocol**: UDP (faster) or TCP (more reliable)
+- **Tunnel Mode**: Full tunnel (all traffic) or Split tunnel (specific routes)
+- **VPN Network**: Internal subnet (default: 10.8.0.0/24)
+
+**Option B: Manual Install (With Repository)**
 
 ```bash
 # Clone repository
@@ -290,14 +334,15 @@ sudo ./scripts/vpn-server.sh install
 
 The script will:
 - ✅ Install OpenVPN and dependencies
-- ✅ Generate PKI certificates
-- ✅ Configure server settings
+- ✅ Generate PKI certificates (CA, server cert, DH params, TLS-auth key)
+- ✅ Configure server settings (customizable)
 - ✅ Set up NAT and IP forwarding
 - ✅ Create systemd services
+- ✅ Configure firewall rules
 
 **Supported OS:** Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux
 
-#### Uninstall VPN Server
+**Uninstall VPN Server:**
 
 ```bash
 sudo ./vpn-server.sh uninstall
@@ -305,7 +350,7 @@ sudo ./vpn-server.sh uninstall
 
 ---
 
-### Step 2: Deploy Agent Container
+#### Step 2: Deploy Agent Container
 
 ### Production Agent
 
@@ -386,6 +431,66 @@ docker stats
 # Disk usage
 docker system df
 ```
+
+---
+
+## 🎯 Feature Configuration
+
+### Certificate Management
+
+The system includes advanced certificate management features:
+
+**Generate Client Certificates:**
+1. Navigate to Users page
+2. Click "Generate Certificate" for a user
+3. Select VPN node
+4. Choose validity period:
+   - Unlimited (never expires)
+   - 1 Day, 1 Week, 2 Weeks
+   - 1 Month, 3 Months, 6 Months, 1 Year
+5. Optionally enable password protection
+6. Download .ovpn file
+
+**Auto-Renewal:**
+- Enable auto-renewal for users
+- Set renewal threshold (e.g., 30 days before expiry)
+- System automatically renews certificates
+- Users must download new .ovpn file after renewal
+
+**Certificate Features:**
+- Download history tracking
+- Certificate revocation list (CRL)
+- Bulk certificate generation
+- Expiration warnings
+
+### Node Configuration
+
+Customize VPN settings per node via Web UI:
+
+**Available Settings:**
+- **Port & Protocol**: UDP (1194) or TCP (443)
+- **Tunnel Mode**: 
+  - Full tunnel: All traffic through VPN
+  - Split tunnel: Only specific routes
+- **Network Settings**:
+  - VPN subnet (e.g., 10.8.0.0/24)
+  - DNS servers (e.g., 8.8.8.8, 1.1.1.1)
+  - Custom routes for split tunnel
+- **Security**:
+  - Cipher: AES-256-GCM, AES-128-GCM, AES-256-CBC
+  - Auth digest: SHA256, SHA384, SHA512
+  - Compression: LZ4-v2, LZ4, LZO, None
+- **Connection**:
+  - Keepalive ping interval
+  - Keepalive timeout
+  - Maximum concurrent clients
+
+**How to Configure:**
+1. Go to Nodes page
+2. Click Configure (⚙️) button on node card
+3. Adjust settings
+4. Click "Update Configuration"
+5. Changes are applied automatically to the VPN server
 
 ---
 

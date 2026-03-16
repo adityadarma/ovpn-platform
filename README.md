@@ -13,6 +13,18 @@ A centralized, open-source VPN management inspired by enterprise solutions (like
 - **Role-Based Access Control (RBAC):** Admin and User roles.
 - **Network Policies:** Define which VPN users can access which internal IP segments via CIDR-based Allow/Deny routing rules.
 - **Active Session Tracking:** Real-time visibility into who is connected, their virtual IPs, data transferred, and session history via the agent's heartbeat.
+- **Client Certificate Management:** 
+  - Generate client certificates with customizable validity periods (1 day to unlimited)
+  - Password-protected private keys (optional)
+  - Auto-renewal before expiration
+  - Certificate revocation list (CRL)
+  - Download history tracking
+- **Node Configuration:** 
+  - Customize VPN settings per node (port, protocol, tunnel mode)
+  - Full/Split tunnel support
+  - Custom DNS servers and routes
+  - Configurable encryption (cipher, auth digest, compression)
+  - Web-based configuration management
 
 ## Architecture
 

@@ -16,16 +16,16 @@ export function NodeCard({ node, onClick }: NodeCardProps) {
       <div className="flex items-start justify-between mb-3">
         <div>
           <h3 className="font-semibold text-gray-900">{node.hostname}</h3>
-          <p className="text-sm text-gray-500">{node.ipAddress}:{node.port}</p>
+          <p className="text-sm text-gray-500">{node.ip_address}:{node.port}</p>
         </div>
         <StatusBadge status={node.status} />
       </div>
       {node.region && (
         <p className="text-xs text-gray-400">📍 {node.region}</p>
       )}
-      {node.lastSeen && (
+      {node.last_seen && (
         <p className="text-xs text-gray-400 mt-1">
-          Last seen: {new Date(node.lastSeen).toLocaleString()}
+          Last seen: {new Date(node.last_seen).toLocaleString()}
         </p>
       )}
     </div>
