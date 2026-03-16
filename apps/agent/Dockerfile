@@ -22,6 +22,10 @@ RUN pnpm deploy --filter @ovpn/agent --prod /prod/agent
 # Final minimal runner stage
 FROM node:24-alpine AS runner
 WORKDIR /app
+
+# Install OpenSSL and Easy-RSA for certificate generation
+RUN apk add --no-cache openssl easy-rsa
+
 COPY --from=builder /prod/agent /app
 # Copy built dist from builder
 COPY --from=builder /app/apps/agent/dist /app/dist

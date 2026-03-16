@@ -150,6 +150,7 @@ services:
       - /dev/net/tun
     volumes:
       - /etc/openvpn/server:/etc/openvpn/server:ro
+      - /etc/openvpn/easy-rsa:/etc/openvpn/easy-rsa
     profiles: [ agent ]
     logging:
       driver: "json-file"
