@@ -2,6 +2,7 @@ import Fastify from 'fastify'
 import { createDb } from '@ovpn/db'
 import type { Env } from './config/env'
 import { NodeStatusChecker } from './services/node-status-checker'
+import { startCertRenewalScheduler } from './services/cert-renewal'
 
 import corsPlugin from './plugins/cors'
 import jwtPlugin from './plugins/jwt'
@@ -69,6 +70,9 @@ export async function buildApp(env: Env) {
   )
   nodeStatusChecker.start()
 
+  // Start certificate renewal scheduler
+  startCertRenewalScheduler(db)
+
   // Cleanup on shutdown
   app.addHook('onClose', async () => {
     nodeStatusChecker.stop()
@@ -77,4 +81,3 @@ export async function buildApp(env: Env) {
 
   return app
 }
-

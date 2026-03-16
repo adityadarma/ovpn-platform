@@ -121,8 +121,12 @@ cipher AES-256-GCM
 persist-key
 persist-tun
 
-# Client certificate authentication (default)
-# For username/password auth, the Manager Agent will configure this later
+# Username/Password Authentication (configured by Manager Agent)
+# The agent will add auth-user-pass-verify script here
+# For now, client certificate auth is used as fallback
+# Uncomment below for username/password only (no client cert):
+# verify-client-cert none
+# username-as-common-name
 
 # Drop privileges (comment out if you have permission issues)
 user nobody

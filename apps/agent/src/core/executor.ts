@@ -6,6 +6,7 @@ import { handleReloadOpenvpn } from '../handlers/reload-openvpn'
 import { handleGenerateConfig } from '../handlers/generate-config'
 import { handleAddFirewallRule } from '../handlers/add-firewall-rule'
 import { handleRemoveFirewallRule } from '../handlers/remove-firewall-rule'
+import { handleGenerateClientCert } from '../handlers/generate-client-cert'
 
 interface Task {
   id: string
@@ -20,6 +21,7 @@ const HANDLERS: Partial<Record<TaskAction, HandlerFn>> = {
   revoke_vpn_user: handleRevokeUser,
   reload_openvpn: handleReloadOpenvpn,
   generate_client_config: handleGenerateConfig,
+  generate_client_cert: handleGenerateClientCert,
   add_firewall_rule: handleAddFirewallRule,
   remove_firewall_rule: handleRemoveFirewallRule,
 }

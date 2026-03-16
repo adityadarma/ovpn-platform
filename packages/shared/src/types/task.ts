@@ -5,6 +5,7 @@ export type TaskAction =
   | 'revoke_vpn_user'
   | 'reload_openvpn'
   | 'generate_client_config'
+  | 'generate_client_cert'
   | 'add_firewall_rule'
   | 'remove_firewall_rule'
   | 'apply_network_policy'

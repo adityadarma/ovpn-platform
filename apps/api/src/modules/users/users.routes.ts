@@ -89,6 +89,281 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     },
   )
 
+  // POST /api/v1/users/:id/generate-cert
+  app.post<{ Params: { id: string }; Body: { nodeId: string; password?: string; passwordProtected?: boolean; validDays?: number } }>(
+    '/users/:id/generate-cert',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        tags: ['users'],
+        summary: 'Generate client certificate for user',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['nodeId'],
+          properties: {
+            nodeId: { type: 'string', format: 'uuid' },
+            password: { type: 'string', description: 'Password to encrypt private key (optional)' },
+            passwordProtected: { type: 'boolean', description: 'Whether to password-protect the key', default: false },
+            validDays: { type: 'number', description: 'Certificate validity in days (default: 3650 = 10 years)', default: 3650 }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const { id } = request.params
+      const { nodeId, password, passwordProtected, validDays = 3650 } = request.body
+
+      const authUser = request.user as { id: string; role: string }
+      if (authUser.role !== 'admin') {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Only admins can generate certificates' })
+      }
+
+      const user = await app.db('users').where({ id }).first()
+      if (!user) {
+        return reply.status(404).send({ error: 'Not Found', message: 'User not found' })
+      }
+
+      const node = await app.db('vpn_nodes').where({ id: nodeId, status: 'online' }).first()
+      if (!node) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Node not found or offline' })
+      }
+
+      // If user has existing certificate, add to revocation list
+      if (user.client_cert) {
+        try {
+          await app.db('cert_revocations').insert({
+            id: crypto.randomUUID(),
+            user_id: id,
+            node_id: nodeId,
+            revoked_cert: user.client_cert,
+            reason: 'Certificate regenerated',
+            revoked_by: authUser.id,
+            revoked_at: new Date()
+          })
+        } catch (err) {
+          console.error('Failed to add to revocation list:', err)
+        }
+      }
+
+      // Create task for agent to generate certificate
+      const taskId = crypto.randomUUID()
+      await app.db('tasks').insert({
+        id: taskId,
+        node_id: nodeId,
+        action: 'generate_client_cert',
+        payload: JSON.stringify({
+          username: user.username,
+          password: passwordProtected ? password : undefined,
+          validDays: validDays
+        }),
+        status: 'pending',
+        created_at: new Date(),
+      })
+
+      // Wait for task completion (with timeout)
+      const maxWait = 30000 // 30 seconds
+      const startTime = Date.now()
+      
+      while (Date.now() - startTime < maxWait) {
+        const task = await app.db('tasks').where({ id: taskId }).first()
+        
+        if (task.status === 'success') {
+          const result = JSON.parse(task.result || '{}')
+          
+          // Save certificate to user record
+          await app.db('users').where({ id }).update({
+            client_cert: result.clientCert,
+            client_key: result.clientKey,
+            cert_password_protected: result.passwordProtected,
+            cert_generated_at: new Date(),
+            cert_expires_at: new Date(result.expiresAt),
+            cert_last_renewed_at: new Date(),
+            cert_renewal_count: app.db.raw('cert_renewal_count + 1')
+          })
+
+          return reply.send({
+            message: 'Certificate generated successfully',
+            expiresAt: result.expiresAt,
+            passwordProtected: result.passwordProtected
+          })
+        }
+        
+        if (task.status === 'failed') {
+          return reply.status(500).send({
+            error: 'Internal Server Error',
+            message: `Failed to generate certificate: ${task.error_message || 'Unknown error'}`
+          })
+        }
+        
+        // Wait 500ms before checking again
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+
+      return reply.status(408).send({
+        error: 'Request Timeout',
+        message: 'Certificate generation timed out'
+      })
+    }
+  )
+
+  // POST /api/v1/users/bulk-generate-cert
+  app.post<{ Body: { userIds: string[]; nodeId: string; password?: string; passwordProtected?: boolean; validDays?: number } }>(
+    '/users/bulk-generate-cert',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        tags: ['users'],
+        summary: 'Bulk generate certificates for multiple users',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['userIds', 'nodeId'],
+          properties: {
+            userIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+            nodeId: { type: 'string', format: 'uuid' },
+            password: { type: 'string' },
+            passwordProtected: { type: 'boolean', default: false },
+            validDays: { type: 'number', default: 3650 }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const { userIds, nodeId, password, passwordProtected, validDays = 3650 } = request.body
+
+      const authUser = request.user as { id: string; role: string }
+      if (authUser.role !== 'admin') {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Only admins can generate certificates' })
+      }
+
+      const node = await app.db('vpn_nodes').where({ id: nodeId, status: 'online' }).first()
+      if (!node) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Node not found or offline' })
+      }
+
+      const results = {
+        success: [] as string[],
+        failed: [] as { userId: string; error: string }[]
+      }
+
+      // Process each user
+      for (const userId of userIds) {
+        try {
+          const user = await app.db('users').where({ id: userId }).first()
+          if (!user) {
+            results.failed.push({ userId, error: 'User not found' })
+            continue
+          }
+
+          // Revoke existing certificate
+          if (user.client_cert) {
+            await app.db('cert_revocations').insert({
+              id: crypto.randomUUID(),
+              user_id: userId,
+              node_id: nodeId,
+              revoked_cert: user.client_cert,
+              reason: 'Bulk certificate generation',
+              revoked_by: authUser.id,
+              revoked_at: new Date()
+            }).catch(() => {})
+          }
+
+          // Create task
+          const taskId = crypto.randomUUID()
+          await app.db('tasks').insert({
+            id: taskId,
+            node_id: nodeId,
+            action: 'generate_client_cert',
+            payload: JSON.stringify({
+              username: user.username,
+              password: passwordProtected ? password : undefined,
+              validDays: validDays
+            }),
+            status: 'pending',
+            created_at: new Date(),
+          })
+
+          // Wait for completion (shorter timeout for bulk)
+          const maxWait = 15000
+          const startTime = Date.now()
+          let success = false
+
+          while (Date.now() - startTime < maxWait) {
+            const task = await app.db('tasks').where({ id: taskId }).first()
+            
+            if (task.status === 'success') {
+              const result = JSON.parse(task.result || '{}')
+              await app.db('users').where({ id: userId }).update({
+                client_cert: result.clientCert,
+                client_key: result.clientKey,
+                cert_password_protected: result.passwordProtected,
+                cert_generated_at: new Date(),
+                cert_expires_at: new Date(result.expiresAt),
+                cert_last_renewed_at: new Date(),
+                cert_renewal_count: app.db.raw('cert_renewal_count + 1')
+              })
+              success = true
+              break
+            }
+            
+            if (task.status === 'failed') {
+              results.failed.push({ userId, error: task.error_message || 'Unknown error' })
+              break
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
+
+          if (success) {
+            results.success.push(userId)
+          } else if (!results.failed.find(f => f.userId === userId)) {
+            results.failed.push({ userId, error: 'Timeout' })
+          }
+        } catch (error: any) {
+          results.failed.push({ userId, error: error.message })
+        }
+      }
+
+      return reply.send({
+        message: `Bulk generation completed: ${results.success.length} succeeded, ${results.failed.length} failed`,
+        results
+      })
+    }
+  )
+
+  // GET /api/v1/users/expiring-certs
+  app.get<{ Querystring: { days?: number } }>(
+    '/users/expiring-certs',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        tags: ['users'],
+        summary: 'Get users with expiring certificates',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            days: { type: 'number', description: 'Days until expiration (default: 30)', default: 30 }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const { days = 30 } = request.query
+      const expiryDate = new Date()
+      expiryDate.setDate(expiryDate.getDate() + days)
+
+      const users = await app.db('users')
+        .whereNotNull('cert_expires_at')
+        .where('cert_expires_at', '<=', expiryDate)
+        .where('cert_expires_at', '>', new Date())
+        .select('id', 'username', 'email', 'cert_expires_at', 'cert_auto_renew')
+
+      return reply.send(users)
+    }
+  )
+
   // GET /api/v1/users/:id/ovpn
   app.get<{ Params: { id: string }; Querystring: { nodeId?: string } }>(
     '/users/:id/ovpn',
@@ -118,6 +393,29 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Bad Request', message: 'Node has not uploaded certificates yet' })
       }
 
+      // Check if user has client certificate
+      if (!user.client_cert || !user.client_key) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'User does not have a client certificate. Generate one first via POST /users/:id/generate-cert'
+        })
+      }
+
+      // Track download history
+      try {
+        await app.db('cert_download_history').insert({
+          id: crypto.randomUUID(),
+          user_id: id,
+          node_id: node.id,
+          ip_address: request.ip,
+          user_agent: request.headers['user-agent'] || null,
+          downloaded_at: new Date()
+        })
+      } catch (err) {
+        // Log but don't fail the download
+        console.error('Failed to track download history:', err)
+      }
+
       const config = `client
 dev tun
 proto udp
@@ -128,12 +426,19 @@ persist-key
 persist-tun
 remote-cert-tls server
 cipher AES-256-GCM
-auth-user-pass
-verify-client-cert none
+verb 3
 
 <ca>
 ${node.ca_cert.trim()}
 </ca>
+
+<cert>
+${user.client_cert.trim()}
+</cert>
+
+<key>
+${user.client_key.trim()}
+</key>
 
 <tls-auth>
 ${node.ta_key.trim()}

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, API_URL } from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
-import { Trash2, Download, Shield, Search, X, Plus } from 'lucide-react'
+import { Trash2, Download, Shield, Search, X, Plus, Key, Lock, AlertTriangle, RefreshCw } from 'lucide-react'
 import type { User } from '@ovpn/shared'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,9 @@ interface CreateUserPayload {
 export default function UsersPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [showCertModal, setShowCertModal] = useState(false)
+  const [selectedUserForCert, setSelectedUserForCert] = useState<User | null>(null)
+  const [certForm, setCertForm] = useState({ nodeId: '', passwordProtected: false, password: '', validDays: 3650 })
   const [form, setForm] = useState<CreateUserPayload>({ username: '', email: '', password: '', role: 'user' })
   const [search, setSearch] = useState('')
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
@@ -26,6 +29,17 @@ export default function UsersPage() {
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ['users'],
     queryFn: () => api.get('/api/v1/users'),
+  })
+
+  const { data: nodes = [] } = useQuery<any[]>({
+    queryKey: ['nodes'],
+    queryFn: () => api.get('/api/v1/nodes'),
+  })
+
+  const { data: expiringCerts = [] } = useQuery<any[]>({
+    queryKey: ['expiring-certs'],
+    queryFn: () => api.get('/api/v1/users/expiring-certs?days=30'),
+    refetchInterval: 60000, // Refresh every minute
   })
 
   const createMutation = useMutation({
@@ -74,6 +88,80 @@ export default function UsersPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  const generateCertMutation = useMutation({
+    mutationFn: ({ userId, nodeId, password, passwordProtected, validDays }: { userId: string; nodeId: string; password?: string; passwordProtected: boolean; validDays: number }) =>
+      api.post(`/api/v1/users/${userId}/generate-cert`, { nodeId, password, passwordProtected, validDays }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      qc.invalidateQueries({ queryKey: ['expiring-certs'] })
+      setShowCertModal(false)
+      setSelectedUserForCert(null)
+      setCertForm({ nodeId: '', passwordProtected: false, password: '', validDays: 3650 })
+      toast.success('Certificate generated successfully')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const bulkGenerateCertMutation = useMutation({
+    mutationFn: ({ userIds, nodeId, password, passwordProtected, validDays }: { userIds: string[]; nodeId: string; password?: string; passwordProtected: boolean; validDays: number }) =>
+      api.post('/api/v1/users/bulk-generate-cert', { userIds, nodeId, password, passwordProtected, validDays }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      qc.invalidateQueries({ queryKey: ['expiring-certs'] })
+      setSelectedUsers(new Set())
+      toast.success(data.message)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const toggleAutoRenewMutation = useMutation({
+    mutationFn: ({ userId, autoRenew }: { userId: string; autoRenew: boolean }) =>
+      api.patch(`/api/v1/users/${userId}`, { certAutoRenew: autoRenew }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      toast.success('Auto-renewal setting updated')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const handleOpenCertModal = (user: User) => {
+    setSelectedUserForCert(user)
+    setShowCertModal(true)
+    // Auto-select first online node if available
+    const onlineNode = nodes.find((n: any) => n.status === 'online')
+    if (onlineNode) {
+      setCertForm(prev => ({ ...prev, nodeId: onlineNode.id }))
+    }
+  }
+
+  const handleBulkGenerateCert = () => {
+    if (selectedUsers.size === 0) {
+      toast.error('No users selected')
+      return
+    }
+    
+    const onlineNode = nodes.find((n: any) => n.status === 'online')
+    if (!onlineNode) {
+      toast.error('No online nodes available')
+      return
+    }
+
+    if (confirm(`Generate certificates for ${selectedUsers.size} user(s)?`)) {
+      bulkGenerateCertMutation.mutate({
+        userIds: Array.from(selectedUsers),
+        nodeId: onlineNode.id,
+        passwordProtected: false,
+        validDays: 3650
+      })
+    }
+  }
+
+  const getDaysUntilExpiry = (expiresAt: string | null) => {
+    if (!expiresAt) return null
+    const days = Math.floor((new Date(expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    return days
+  }
 
   const toggleUser = (userId: string) => {
     const newSelected = new Set(selectedUsers)
@@ -148,6 +236,36 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
+      {/* Expiring Certificates Warning */}
+      {expiringCerts.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-900">Certificate Expiration Warning</h3>
+              <p className="text-sm text-amber-700 mt-1">
+                {expiringCerts.length} user{expiringCerts.length !== 1 ? 's have' : ' has'} certificate{expiringCerts.length !== 1 ? 's' : ''} expiring within 30 days:
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {expiringCerts.slice(0, 5).map((cert: any) => (
+                  <span key={cert.id} className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-amber-200 rounded text-xs text-amber-800">
+                    {cert.username}
+                    <span className="text-amber-600">
+                      ({getDaysUntilExpiry(cert.certExpiresAt)} days)
+                    </span>
+                  </span>
+                ))}
+                {expiringCerts.length > 5 && (
+                  <span className="text-xs text-amber-700 px-2 py-1">
+                    +{expiringCerts.length - 5} more
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -160,6 +278,15 @@ export default function UsersPage() {
         <div className="flex gap-2">
           {selectedUsers.size > 0 && (
             <>
+              <Button
+                variant="outline"
+                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                onClick={handleBulkGenerateCert}
+                disabled={bulkGenerateCertMutation.isPending || nodes.filter((n: any) => n.status === 'online').length === 0}
+              >
+                <Key className="mr-2 h-4 w-4" />
+                Generate Certs ({selectedUsers.size})
+              </Button>
               <Button
                 variant="outline"
                 className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
@@ -250,7 +377,14 @@ export default function UsersPage() {
                       {user.username[0].toUpperCase()}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{user.username}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-gray-900">{user.username}</p>
+                        {(user as any).clientCert && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700" title="Has certificate">
+                            <Key className="h-3 w-3" />
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-400">{user.email ?? 'No email'}</p>
                     </div>
                   </div>
@@ -278,6 +412,13 @@ export default function UsersPage() {
                 </td>
                 <td className="px-5 py-4">
                   <div className="flex items-center justify-end gap-1">
+                    <button
+                      onClick={() => handleOpenCertModal(user)}
+                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Generate certificate"
+                    >
+                      <Key className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => handleDownloadConfig(user)}
                       disabled={isDownloading === user.id}
@@ -377,6 +518,171 @@ export default function UsersPage() {
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700"
                 >
                   {createMutation.isPending ? 'Creating...' : 'Create User'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Generate Certificate Modal */}
+      {showCertModal && selectedUserForCert && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <Key className="h-5 w-5 text-blue-600" />
+                  Generate Certificate
+                </h2>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  For user: <span className="font-medium text-gray-600">{selectedUserForCert.username}</span>
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowCertModal(false)
+                  setSelectedUserForCert(null)
+                  setCertForm({ nodeId: '', passwordProtected: false, password: '', validDays: 3650 })
+                }} 
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-md"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (!certForm.nodeId) {
+                  toast.error('Please select a node')
+                  return
+                }
+                if (certForm.passwordProtected && !certForm.password) {
+                  toast.error('Please enter a password')
+                  return
+                }
+                generateCertMutation.mutate({
+                  userId: selectedUserForCert.id,
+                  nodeId: certForm.nodeId,
+                  password: certForm.passwordProtected ? certForm.password : undefined,
+                  passwordProtected: certForm.passwordProtected,
+                  validDays: certForm.validDays
+                })
+              }}
+              className="p-5 space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  VPN Node <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={certForm.nodeId}
+                  onChange={(e) => setCertForm({ ...certForm, nodeId: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Select a node...</option>
+                  {nodes.filter((n: any) => n.status === 'online').map((node: any) => (
+                    <option key={node.id} value={node.id}>
+                      {node.hostname} ({node.ipAddress})
+                    </option>
+                  ))}
+                </select>
+                {nodes.filter((n: any) => n.status === 'online').length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">⚠️ No online nodes available</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Certificate Validity Period
+                </label>
+                <select
+                  value={certForm.validDays}
+                  onChange={(e) => setCertForm({ ...certForm, validDays: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="365">1 Year (365 days)</option>
+                  <option value="730">2 Years (730 days)</option>
+                  <option value="1825">5 Years (1,825 days)</option>
+                  <option value="3650">10 Years (3,650 days)</option>
+                  <option value="7300">20 Years (7,300 days)</option>
+                  <option value="18250">50 Years (18,250 days)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Longer validity = less maintenance, but less security if compromised
+                </p>
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="passwordProtected"
+                    checked={certForm.passwordProtected}
+                    onChange={(e) => setCertForm({ ...certForm, passwordProtected: e.target.checked, password: '' })}
+                    className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="passwordProtected" className="block text-sm font-medium text-gray-700 cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        <Lock className="h-4 w-4 text-gray-400" />
+                        Password-protect private key
+                      </div>
+                    </label>
+                    <p className="text-xs text-gray-500 mt-1">
+                      User will need to enter password when connecting to VPN
+                    </p>
+                  </div>
+                </div>
+
+                {certForm.passwordProtected && (
+                  <div className="pl-7">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Key Password <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={certForm.password}
+                      onChange={(e) => setCertForm({ ...certForm, password: e.target.value })}
+                      placeholder="Enter password for private key"
+                      required={certForm.passwordProtected}
+                      minLength={8}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Min. 8 characters. User must remember this password.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>Note:</strong> This will generate a new client certificate and private key. 
+                  Any existing certificate for this user will be revoked.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowCertModal(false)
+                    setSelectedUserForCert(null)
+                    setCertForm({ nodeId: '', passwordProtected: false, password: '', validDays: 3650 })
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={generateCertMutation.isPending || nodes.filter((n: any) => n.status === 'online').length === 0}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  {generateCertMutation.isPending ? 'Generating...' : 'Generate Certificate'}
                 </Button>
               </div>
             </form>
