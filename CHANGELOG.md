@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Security checklist and best practices
   - See `docs/SECURITY-HARDENING.md`
 
+### Fixed
+- **Agent Certificate Generation**: Fixed "easyrsa: not found" error
+  - Changed from relative path `./easyrsa` to absolute path with `cwd` option
+  - Added validation to check if easyrsa script exists before execution
+  - Removed `process.chdir()` which caused working directory issues
+  - Affects: generate-client-cert, create-user, revoke-user handlers
+
 ## [1.1.0] - 2024-03-16
 
 ### Fixed

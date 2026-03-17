@@ -27,15 +27,17 @@ export async function handleGenerateClientCert(params: Record<string, unknown>):
   const certValidDays = (validDays === null || validDays === 0) ? 36500 : (validDays ?? 3650)
 
   const EASYRSA_DIR = '/etc/openvpn/easy-rsa'
+  const EASYRSA_BIN = `${EASYRSA_DIR}/easyrsa`
   
   if (!existsSync(EASYRSA_DIR)) {
     throw new Error('EasyRSA directory not found. Please install OpenVPN server first.')
   }
 
-  try {
-    // Change to EasyRSA directory
-    process.chdir(EASYRSA_DIR)
+  if (!existsSync(EASYRSA_BIN)) {
+    throw new Error(`EasyRSA script not found at ${EASYRSA_BIN}. Please check OpenVPN installation.`)
+  }
 
+  try {
     // Check if client certificate already exists
     const certPath = `${EASYRSA_DIR}/pki/issued/${username}.crt`
     const keyPath = `${EASYRSA_DIR}/pki/private/${username}.key`
@@ -44,7 +46,8 @@ export async function handleGenerateClientCert(params: Record<string, unknown>):
     if (existsSync(certPath)) {
       console.log(`Certificate for ${username} already exists, revoking...`)
       try {
-        execSync(`./easyrsa revoke ${username}`, {
+        execSync(`${EASYRSA_BIN} revoke ${username}`, {
+          cwd: EASYRSA_DIR,
           env: { ...process.env, EASYRSA_BATCH: '1' },
           stdio: 'pipe'
         })
@@ -59,7 +62,8 @@ export async function handleGenerateClientCert(params: Record<string, unknown>):
     
     if (password) {
       // Generate with password-protected key
-      execSync(`./easyrsa build-client-full ${username}`, {
+      execSync(`${EASYRSA_BIN} build-client-full ${username}`, {
+        cwd: EASYRSA_DIR,
         env: { 
           ...process.env, 
           EASYRSA_BATCH: '1',
@@ -70,7 +74,8 @@ export async function handleGenerateClientCert(params: Record<string, unknown>):
       })
     } else {
       // Generate without password (nopass)
-      execSync(`./easyrsa build-client-full ${username} nopass`, {
+      execSync(`${EASYRSA_BIN} build-client-full ${username} nopass`, {
+        cwd: EASYRSA_DIR,
         env: { 
           ...process.env, 
           EASYRSA_BATCH: '1',
