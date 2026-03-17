@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify'
+import crypto from 'node:crypto'
 import { TaskResultSchema } from '@ovpn/shared'
 
 const taskRoutes: FastifyPluginAsync = async (app) => {
@@ -18,6 +19,61 @@ const taskRoutes: FastifyPluginAsync = async (app) => {
       if (query.status) builder.where('t.status', query.status)
 
       return builder
+    },
+  )
+
+  // POST /api/v1/tasks — create a new task
+  app.post<{ Body: { node_id: string; action: string; payload: Record<string, unknown> } }>(
+    '/tasks',
+    { 
+      onRequest: [app.authenticate], 
+      schema: { 
+        tags: ['tasks'], 
+        summary: 'Create a new task',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['node_id', 'action', 'payload'],
+          properties: {
+            node_id: { type: 'string', description: 'Node ID to execute task on' },
+            action: { type: 'string', description: 'Task action type' },
+            payload: { type: 'object', description: 'Task payload data' }
+          }
+        }
+      } 
+    },
+    async (request, reply) => {
+      const { node_id, action, payload } = request.body
+
+      // Validate node exists
+      const node = await app.db('vpn_nodes').where({ id: node_id }).first()
+      if (!node) {
+        return reply.status(404).send({ error: 'Not Found', message: 'Node not found' })
+      }
+
+      // Create task
+      const taskId = crypto.randomUUID()
+      await app.db('tasks').insert({
+        id: taskId,
+        node_id,
+        action,
+        payload: JSON.stringify(payload),
+        status: 'pending',
+        result: null,
+        error_message: null,
+        created_at: new Date(),
+        completed_at: null
+      })
+
+      app.log.info(`[tasks] Created task ${taskId} for node ${node_id}: ${action}`)
+
+      return reply.status(201).send({
+        id: taskId,
+        node_id,
+        action,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      })
     },
   )
 

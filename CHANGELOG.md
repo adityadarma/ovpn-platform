@@ -31,11 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - See `docs/CERTIFICATE-SYNC.md`
 
 ### Fixed
+- **GitHub Actions**: Updated workflow to use Node.js 24
+  - Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` environment variable
+  - Future-proofs workflow ahead of June 2nd, 2026 deadline
+  - Resolves deprecation warning for Node.js 20 actions
 - **Agent Certificate Generation**: Fixed "easyrsa: not found" error
   - Changed from relative path `./easyrsa` to absolute path with `cwd` option
   - Added validation to check if easyrsa script exists before execution
   - Removed `process.chdir()` which caused working directory issues
   - Affects: generate-client-cert, create-user, revoke-user handlers
+- **Tasks API**: Added missing POST endpoint for creating tasks
+  - Route: `POST /api/v1/tasks`
+  - Required for UI to trigger sync certificates and other tasks
+  - Returns task ID and status
 
 ## [1.1.0] - 2024-03-16
 
