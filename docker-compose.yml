@@ -87,12 +87,20 @@ services:
       - "${API_PORT:-3001}:${API_PORT:-3001}"
     volumes:
       - api_data:/data
+    # Wait for database if using postgres or mysql
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      mariadb:
+        condition: service_healthy
+        required: false
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:${API_PORT:-3001}/api/v1/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - vpn-network
     logging:
@@ -115,9 +123,16 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
     ports:
       - "${WEB_PORT:-3000}:3000"
+    # Wait for API to be healthy before starting
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - vpn-network
     logging:
@@ -142,6 +157,10 @@ services:
       AGENT_SECRET_TOKEN: ${AGENT_SECRET_TOKEN:?AGENT_SECRET_TOKEN is required}
       AGENT_POLL_INTERVAL_MS: ${AGENT_POLL_INTERVAL_MS:-5000}
       AGENT_HEARTBEAT_INTERVAL_MS: ${AGENT_HEARTBEAT_INTERVAL_MS:-30000}
+    # Wait for API to be healthy before starting agent
+    depends_on:
+      api:
+        condition: service_healthy
     networks:
       - vpn-network
     cap_add:

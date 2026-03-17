@@ -3,7 +3,28 @@
 # VPN Manager - Standalone Agent Installation Script
 # ============================================================
 # This script installs only the Agent on a VPN node server
-# Usage: curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
+# 
+# Usage:
+#   Interactive: curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
+#   
+#   Automated (with env vars):
+#     MANAGER_URL=http://manager:3001 \
+#     REG_KEY=your-key \
+#     SKIP_OPENVPN=yes \
+#     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
+#
+# Environment Variables (for automation):
+#   MANAGER_URL          - Manager API URL (required)
+#   REG_KEY              - Registration key for auto-registration
+#   JWT_TOKEN            - Admin JWT token for auto-registration (alternative to REG_KEY)
+#   NODE_ID              - Node ID for manual registration
+#   SECRET_TOKEN         - Secret token for manual registration
+#   HOSTNAME             - Node hostname (default: system hostname)
+#   IP_ADDRESS           - Node IP address (default: detected IP)
+#   REGION               - Node region/location
+#   SKIP_OPENVPN         - Skip OpenVPN check (yes/no)
+#   POLL_INTERVAL        - Poll interval in ms (default: 5000)
+#   HEARTBEAT_INTERVAL   - Heartbeat interval in ms (default: 30000)
 # ============================================================
 
 set -e
@@ -72,16 +93,47 @@ check_docker_compose() {
 }
 
 check_openvpn() {
+    # Skip check if SKIP_OPENVPN is set
+    if [ "$SKIP_OPENVPN" == "yes" ]; then
+        print_warning "Skipping OpenVPN check (SKIP_OPENVPN=yes)"
+        return 0
+    fi
+    
     if [ ! -d "/etc/openvpn/server" ]; then
         print_warning "OpenVPN server directory not found at /etc/openvpn/server"
-        print_info "Make sure OpenVPN is installed first"
-        read -p "Do you want to install OpenVPN server now? [y/N]: " install_vpn </dev/tty
-        if [[ "$install_vpn" == "y" || "$install_vpn" == "Y" ]]; then
-            install_openvpn_server
-        else
-            print_error "OpenVPN is required. Exiting."
-            exit 1
-        fi
+        print_info "The agent requires OpenVPN to be installed on this server"
+        echo ""
+        print_info "Options:"
+        echo "  1. Install OpenVPN now (interactive setup)"
+        echo "  2. Skip OpenVPN installation (I'll install it manually later)"
+        echo "  3. Exit (OpenVPN is already installed elsewhere)"
+        echo ""
+        read -p "Choose option [1/2/3]: " install_option </dev/tty
+        
+        case "$install_option" in
+            1)
+                print_info "Starting OpenVPN installation..."
+                print_warning "This will be an interactive setup. Please answer the prompts."
+                echo ""
+                sleep 2
+                install_openvpn_server
+                ;;
+            2)
+                print_warning "Skipping OpenVPN installation"
+                print_info "Please install OpenVPN manually before starting the agent"
+                print_info "You can use: curl -fsSL $REPO_URL/scripts/vpn-server.sh | sudo bash"
+                echo ""
+                read -p "Press Enter to continue with agent setup..." </dev/tty
+                ;;
+            3)
+                print_info "Exiting installation"
+                exit 0
+                ;;
+            *)
+                print_error "Invalid option. Exiting."
+                exit 1
+                ;;
+        esac
     else
         print_success "OpenVPN server directory found"
     fi
@@ -89,14 +141,39 @@ check_openvpn() {
 
 install_openvpn_server() {
     print_info "Installing OpenVPN server..."
+    echo ""
+    print_warning "The OpenVPN installer will ask you several questions:"
+    print_info "- Server IP address"
+    print_info "- Port and protocol"
+    print_info "- DNS servers"
+    print_info "- Client name (you can skip this)"
+    echo ""
+    print_info "After installation completes, this script will continue with agent setup"
+    echo ""
+    sleep 3
     
-    # Download and run vpn-server.sh
+    # Download and run vpn-server.sh in interactive mode
     curl -fsSL "$REPO_URL/scripts/vpn-server.sh" -o /tmp/vpn-server.sh
     chmod +x /tmp/vpn-server.sh
-    /tmp/vpn-server.sh install
-    rm -f /tmp/vpn-server.sh
     
-    print_success "OpenVPN server installed"
+    # Run the installer
+    if /tmp/vpn-server.sh install; then
+        print_success "OpenVPN server installed successfully"
+    else
+        print_error "OpenVPN installation failed"
+        print_info "You can install it manually later with:"
+        print_info "  curl -fsSL $REPO_URL/scripts/vpn-server.sh | sudo bash"
+        echo ""
+        read -p "Continue with agent setup anyway? [y/N]: " continue_anyway </dev/tty
+        if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+            exit 1
+        fi
+    fi
+    
+    rm -f /tmp/vpn-server.sh
+    echo ""
+    print_info "Continuing with agent installation..."
+    sleep 2
 }
 
 create_install_dir() {
@@ -217,120 +294,167 @@ EOF
 configure_env() {
     print_info "Configuring environment variables..."
     
-    echo ""
-    echo "============================================================"
-    echo "  Agent Configuration"
-    echo "============================================================"
-    echo ""
-    
-    # Get Manager URL
-    read -p "Enter Manager API URL (e.g., http://manager-server:3001): " MANAGER_URL </dev/tty
-    while [ -z "$MANAGER_URL" ]; do
-        print_error "Manager URL is required"
-        read -p "Enter Manager API URL: " MANAGER_URL </dev/tty
-    done
-    
-    # Check if auto-registration is available
-    echo ""
-    print_info "Registration Options:"
-    echo "  1. Auto-register (requires Admin JWT token or Registration Key)"
-    echo "  2. Manual registration (use existing Node ID and Secret Token)"
-    echo ""
-    read -p "Choose registration method [1/2] (default: 2): " REG_METHOD </dev/tty
-    REG_METHOD=${REG_METHOD:-2}
-    
-    if [ "$REG_METHOD" == "1" ]; then
-        # Auto-registration
-        echo ""
-        print_info "Auto-Registration Setup"
-        echo ""
+    # Check if running in automated mode
+    if [ -n "$MANAGER_URL" ] && { [ -n "$REG_KEY" ] || [ -n "$JWT_TOKEN" ] || { [ -n "$NODE_ID" ] && [ -n "$SECRET_TOKEN" ]; }; }; then
+        print_info "Running in automated mode (environment variables detected)"
         
-        # Get hostname
-        DEFAULT_HOSTNAME=$(hostname)
-        read -p "Enter hostname (default: $DEFAULT_HOSTNAME): " HOSTNAME </dev/tty
-        HOSTNAME=${HOSTNAME:-$DEFAULT_HOSTNAME}
-        
-        # Get IP address
-        DEFAULT_IP=$(hostname -I | awk '{print $1}')
-        read -p "Enter public IP address (default: $DEFAULT_IP): " IP_ADDRESS </dev/tty
-        IP_ADDRESS=${IP_ADDRESS:-$DEFAULT_IP}
-        
-        # Get region (optional)
-        read -p "Enter region/location (optional, e.g., Singapore, US-East): " REGION </dev/tty
-        
-        # Choose auth method
-        echo ""
-        print_info "Authentication Method:"
-        echo "  1. Admin JWT Token (login to Web UI first, copy token from browser)"
-        echo "  2. Registration Key (from NODE_REGISTRATION_KEY in .env)"
-        echo ""
-        read -p "Choose auth method [1/2]: " AUTH_METHOD </dev/tty
-        
-        if [ "$AUTH_METHOD" == "1" ]; then
-            echo ""
-            print_info "To get Admin JWT Token:"
-            print_info "1. Login to Manager Web UI as admin"
-            print_info "2. Open browser DevTools (F12) → Application/Storage → Local Storage"
-            print_info "3. Copy the 'token' value"
-            echo ""
-            read -p "Enter Admin JWT Token: " JWT_TOKEN </dev/tty
-            while [ -z "$JWT_TOKEN" ]; do
-                print_error "JWT Token is required"
-                read -p "Enter Admin JWT Token: " JWT_TOKEN </dev/tty
-            done
+        # Use environment variables
+        if [ -n "$REG_KEY" ]; then
+            # Auto-register with registration key
+            HOSTNAME=${HOSTNAME:-$(hostname)}
+            IP_ADDRESS=${IP_ADDRESS:-$(hostname -I | awk '{print $1}')}
             
-            if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "jwt" "$JWT_TOKEN"; then
-                print_success "Auto-registration successful!"
-            else
-                print_error "Auto-registration failed. Falling back to manual registration."
-                REG_METHOD=2
-            fi
-        else
-            echo ""
-            read -p "Enter Registration Key (from NODE_REGISTRATION_KEY): " REG_KEY </dev/tty
-            while [ -z "$REG_KEY" ]; do
-                print_error "Registration Key is required"
-                read -p "Enter Registration Key: " REG_KEY </dev/tty
-            done
+            print_info "Auto-registering node..."
+            print_info "  Hostname: $HOSTNAME"
+            print_info "  IP: $IP_ADDRESS"
+            print_info "  Region: ${REGION:-none}"
             
             if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "key" "$REG_KEY"; then
                 print_success "Auto-registration successful!"
             else
-                print_error "Auto-registration failed. Falling back to manual registration."
-                REG_METHOD=2
+                print_error "Auto-registration failed"
+                exit 1
+            fi
+        elif [ -n "$JWT_TOKEN" ]; then
+            # Auto-register with JWT token
+            HOSTNAME=${HOSTNAME:-$(hostname)}
+            IP_ADDRESS=${IP_ADDRESS:-$(hostname -I | awk '{print $1}')}
+            
+            print_info "Auto-registering node with JWT..."
+            print_info "  Hostname: $HOSTNAME"
+            print_info "  IP: $IP_ADDRESS"
+            print_info "  Region: ${REGION:-none}"
+            
+            if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "jwt" "$JWT_TOKEN"; then
+                print_success "Auto-registration successful!"
+            else
+                print_error "Auto-registration failed"
+                exit 1
+            fi
+        else
+            # Manual registration with provided credentials
+            print_info "Using provided Node ID and Secret Token"
+        fi
+        
+        POLL_INTERVAL=${POLL_INTERVAL:-5000}
+        HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30000}
+    else
+        # Interactive mode
+        echo ""
+        echo "============================================================"
+        echo "  Agent Configuration"
+        echo "============================================================"
+        echo ""
+        
+        # Get Manager URL
+        read -p "Enter Manager API URL (e.g., http://manager-server:3001): " MANAGER_URL </dev/tty
+        while [ -z "$MANAGER_URL" ]; do
+            print_error "Manager URL is required"
+            read -p "Enter Manager API URL: " MANAGER_URL </dev/tty
+        done
+        
+        # Check if auto-registration is available
+        echo ""
+        print_info "Registration Options:"
+        echo "  1. Auto-register (requires Admin JWT token or Registration Key)"
+        echo "  2. Manual registration (use existing Node ID and Secret Token)"
+        echo ""
+        read -p "Choose registration method [1/2] (default: 2): " REG_METHOD </dev/tty
+        REG_METHOD=${REG_METHOD:-2}
+        
+        if [ "$REG_METHOD" == "1" ]; then
+            # Auto-registration
+            echo ""
+            print_info "Auto-Registration Setup"
+            echo ""
+            
+            # Get hostname
+            DEFAULT_HOSTNAME=$(hostname)
+            read -p "Enter hostname (default: $DEFAULT_HOSTNAME): " HOSTNAME </dev/tty
+            HOSTNAME=${HOSTNAME:-$DEFAULT_HOSTNAME}
+            
+            # Get IP address
+            DEFAULT_IP=$(hostname -I | awk '{print $1}')
+            read -p "Enter public IP address (default: $DEFAULT_IP): " IP_ADDRESS </dev/tty
+            IP_ADDRESS=${IP_ADDRESS:-$DEFAULT_IP}
+            
+            # Get region (optional)
+            read -p "Enter region/location (optional, e.g., Singapore, US-East): " REGION </dev/tty
+            
+            # Choose auth method
+            echo ""
+            print_info "Authentication Method:"
+            echo "  1. Admin JWT Token (login to Web UI first, copy token from browser)"
+            echo "  2. Registration Key (from NODE_REGISTRATION_KEY in .env)"
+            echo ""
+            read -p "Choose auth method [1/2]: " AUTH_METHOD </dev/tty
+            
+            if [ "$AUTH_METHOD" == "1" ]; then
+                echo ""
+                print_info "To get Admin JWT Token:"
+                print_info "1. Login to Manager Web UI as admin"
+                print_info "2. Open browser DevTools (F12) → Application/Storage → Local Storage"
+                print_info "3. Copy the 'token' value"
+                echo ""
+                read -p "Enter Admin JWT Token: " JWT_TOKEN </dev/tty
+                while [ -z "$JWT_TOKEN" ]; do
+                    print_error "JWT Token is required"
+                    read -p "Enter Admin JWT Token: " JWT_TOKEN </dev/tty
+                done
+                
+                if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "jwt" "$JWT_TOKEN"; then
+                    print_success "Auto-registration successful!"
+                else
+                    print_error "Auto-registration failed. Falling back to manual registration."
+                    REG_METHOD=2
+                fi
+            else
+                echo ""
+                read -p "Enter Registration Key (from NODE_REGISTRATION_KEY): " REG_KEY </dev/tty
+                while [ -z "$REG_KEY" ]; do
+                    print_error "Registration Key is required"
+                    read -p "Enter Registration Key: " REG_KEY </dev/tty
+                done
+                
+                if auto_register_node "$MANAGER_URL" "$HOSTNAME" "$IP_ADDRESS" "$REGION" "key" "$REG_KEY"; then
+                    print_success "Auto-registration successful!"
+                else
+                    print_error "Auto-registration failed. Falling back to manual registration."
+                    REG_METHOD=2
+                fi
             fi
         fi
-    fi
-    
-    # Manual registration (or fallback from failed auto-registration)
-    if [ "$REG_METHOD" == "2" ] || [ -z "$NODE_ID" ] || [ -z "$SECRET_TOKEN" ]; then
-        echo ""
-        print_info "Manual Registration"
-        print_info "To get Node ID and Secret Token:"
-        print_info "1. Go to Manager Web UI → Nodes → Add Node"
-        print_info "2. Fill in node details and click 'Register'"
-        print_info "3. Copy the Node ID and Secret Token"
-        echo ""
         
-        read -p "Enter Node ID: " NODE_ID </dev/tty
-        while [ -z "$NODE_ID" ]; do
-            print_error "Node ID is required"
+        # Manual registration (or fallback from failed auto-registration)
+        if [ "$REG_METHOD" == "2" ] || [ -z "$NODE_ID" ] || [ -z "$SECRET_TOKEN" ]; then
+            echo ""
+            print_info "Manual Registration"
+            print_info "To get Node ID and Secret Token:"
+            print_info "1. Go to Manager Web UI → Nodes → Add Node"
+            print_info "2. Fill in node details and click 'Register'"
+            print_info "3. Copy the Node ID and Secret Token"
+            echo ""
+            
             read -p "Enter Node ID: " NODE_ID </dev/tty
-        done
-        
-        read -p "Enter Secret Token: " SECRET_TOKEN </dev/tty
-        while [ -z "$SECRET_TOKEN" ]; do
-            print_error "Secret Token is required"
+            while [ -z "$NODE_ID" ]; do
+                print_error "Node ID is required"
+                read -p "Enter Node ID: " NODE_ID </dev/tty
+            done
+            
             read -p "Enter Secret Token: " SECRET_TOKEN </dev/tty
-        done
+            while [ -z "$SECRET_TOKEN" ]; do
+                print_error "Secret Token is required"
+                read -p "Enter Secret Token: " SECRET_TOKEN </dev/tty
+            done
+        fi
+        
+        # Optional: Poll and Heartbeat intervals
+        read -p "Poll interval in milliseconds (default: 5000): " POLL_INTERVAL </dev/tty
+        POLL_INTERVAL=${POLL_INTERVAL:-5000}
+        
+        read -p "Heartbeat interval in milliseconds (default: 30000): " HEARTBEAT_INTERVAL </dev/tty
+        HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30000}
     fi
-    
-    # Optional: Poll and Heartbeat intervals
-    read -p "Poll interval in milliseconds (default: 5000): " POLL_INTERVAL </dev/tty
-    POLL_INTERVAL=${POLL_INTERVAL:-5000}
-    
-    read -p "Heartbeat interval in milliseconds (default: 30000): " HEARTBEAT_INTERVAL </dev/tty
-    HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30000}
     
     # Create .env file from template
     cp .env.template .env

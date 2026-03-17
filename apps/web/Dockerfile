@@ -26,6 +26,8 @@ RUN pnpm --filter @vpn/web build
 FROM node:24-alpine AS runner
 WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+# Install wget for healthcheck
+RUN apk add --no-cache wget
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
