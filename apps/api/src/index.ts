@@ -13,7 +13,6 @@ async function main() {
   const env = loadEnv()
 
   console.log('🚀 OVPN API starting...')
-  console.log(`   Version: 2024-03-16-debug-v2`)
   console.log(`   Port: ${env.PORT}`)
   console.log(`   Host: ${env.HOST}`)
   console.log(`   Environment: ${env.NODE_ENV}`)

@@ -206,7 +206,7 @@ persist-tun
 
 # Drop privileges (comment out if you have permission issues)
 user nobody
-group nobody
+group nogroup
 
 status /var/log/openvpn/status.log
 log /var/log/openvpn/openvpn.log
@@ -308,8 +308,8 @@ EOF
     echo ""
     echo "Useful commands:"
     echo " - Check status: systemctl status openvpn-server@server.service"
-    echo " - View logs: tail -f /var/log/openvpn.log"
-    echo " - Check connections: cat /var/log/openvpn-status.log"
+    echo " - View logs: tail -f /var/log/openvpn/openvpn.log"
+    echo " - Check connections: cat /var/log/openvpn/status.log"
 }
 
 uninstall_vpn() {

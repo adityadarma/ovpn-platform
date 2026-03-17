@@ -12,7 +12,7 @@ By default, OpenVPN Manager runs OpenVPN as `root` to avoid permission issues. F
 # Drop privileges after initialization
 # Uncomment if you want enhanced security (may cause permission issues with some features)
 # user nobody
-# group nobody
+# group nogroup
 ```
 
 **Pros:**
@@ -31,16 +31,16 @@ By default, OpenVPN Manager runs OpenVPN as `root` to avoid permission issues. F
    ```bash
    # Make log directory writable
    sudo mkdir -p /var/log/openvpn
-   sudo chown -R nobody:nobody /var/log/openvpn
+   sudo chown -R nobody:nogroup /var/log/openvpn
    
    # Make CRL readable
-   sudo chown nobody:nobody /etc/openvpn/server/crl.pem 2>/dev/null || true
+   sudo chown nobody:nogroup /etc/openvpn/server/crl.pem 2>/dev/null || true
    ```
 
 2. **Enable in config** (`/etc/openvpn/server/server.conf`):
    ```conf
    user nobody
-   group nobody
+   group nogroup
    ```
 
 3. **Restart OpenVPN**:
@@ -180,10 +180,10 @@ Monitor logs:
 
 ```bash
 # Watch for failed auth attempts
-sudo tail -f /var/log/openvpn.log | grep -i "auth\|fail\|error"
+sudo tail -f /var/log/openvpn/openvpn.log | grep -i "auth\|fail\|error"
 
 # Check active connections
-sudo cat /var/log/openvpn-status.log
+sudo cat /var/log/openvpn/status.log
 ```
 
 ### 8. SELinux/AppArmor
@@ -264,7 +264,7 @@ If you see permission errors after enabling privilege dropping:
 
 ```bash
 # Check log ownership
-sudo chown -R nobody:nobody /var/log/openvpn
+sudo chown -R nobody:nogroup /var/log/openvpn
 
 # Check config directory
 sudo chmod 755 /etc/openvpn/server
@@ -291,7 +291,7 @@ Client-connect/disconnect scripts need proper permissions:
 sudo chmod +x /etc/openvpn/server/scripts/*
 
 # Set ownership
-sudo chown nobody:nobody /etc/openvpn/server/scripts/*
+sudo chown nobody:nogroup /etc/openvpn/server/scripts/*
 ```
 
 ## References

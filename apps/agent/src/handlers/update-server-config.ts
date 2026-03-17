@@ -88,7 +88,7 @@ persist-tun
     newConfig += `
 # Drop privileges (comment out if you have permission issues)
 user nobody
-group nobody
+group nogroup
 
 # Logging
 status /var/log/openvpn/status.log

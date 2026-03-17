@@ -36,7 +36,7 @@ COPY --from=builder /prod/api /app
 # tsx is only needed for migrations at boot (Knex dynamic TS loading)
 RUN npm install -g tsx
 ENV NODE_ENV=production
-RUN mkdir -p /data && chown -R nobody:nobody /data
+RUN mkdir -p /data && chown -R nobody:nogroup /data
 RUN chmod +x /app/start.sh
 USER nobody
 EXPOSE 3001

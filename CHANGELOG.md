@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Security Enhancement**: Upgraded from `tls-auth` to `tls-crypt` for better security
+  - `tls-crypt` provides both authentication and encryption of TLS handshake packets
+  - More resistant to traffic analysis and port scanning
+  - No `key-direction` parameter needed (simpler configuration)
+  - Backward compatible: `ta_key` database field supports both methods
+
+### Added
+- **Security Documentation**: Added comprehensive security hardening guide
+  - User/group privilege dropping options
+  - Firewall and rate limiting configurations
+  - CRL (Certificate Revocation List) setup
+  - SELinux/AppArmor policies
+  - Security checklist and best practices
+  - See `docs/SECURITY-HARDENING.md`
+
 ## [1.1.0] - 2024-03-16
 
 ### Fixed
@@ -18,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added logging in API task result endpoint to track incoming agent requests
 - Added version identifier in API startup logs for debugging
 - **VPN Server Installation**: Fixed multiple issues on Debian 13
-  - Missing directory creation for ta.key
+  - Missing directory creation for TLS key
   - Removed problematic `verify-client-cert none` directive
   - Changed `group nogroup` to `group nobody` for cross-distro compatibility
 - **Certificate Generation**: Fixed "Username is required" error
