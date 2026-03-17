@@ -137,6 +137,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         const validRegistrationKey = process.env.NODE_REGISTRATION_KEY
         
         if (!validRegistrationKey) {
+          app.log.warn('[node-register] NODE_REGISTRATION_KEY not set in environment')
           return reply.status(403).send({
             error: 'Forbidden',
             message: 'Node registration requires admin authentication or registration key. Set NODE_REGISTRATION_KEY in environment variables.',
@@ -144,6 +145,11 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         }
 
         if (registrationKey !== validRegistrationKey) {
+          app.log.warn({
+            msg: '[node-register] Invalid registration key provided',
+            provided: registrationKey ? `${registrationKey.substring(0, 10)}...` : 'none',
+            expected: `${validRegistrationKey.substring(0, 10)}...`
+          })
           return reply.status(403).send({
             error: 'Forbidden',
             message: 'Invalid registration key',
@@ -151,6 +157,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         }
 
         isAuthenticated = true
+        app.log.info('[node-register] Registration key validated successfully')
       }
 
       if (!isAuthenticated) {

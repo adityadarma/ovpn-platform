@@ -136,6 +136,32 @@ check_openvpn() {
         esac
     else
         print_success "OpenVPN server directory found"
+        
+        # Check if easy-rsa is installed
+        if [ ! -f "/etc/openvpn/easy-rsa/easyrsa" ]; then
+            print_warning "EasyRSA not found at /etc/openvpn/easy-rsa/easyrsa"
+            print_info "Installing EasyRSA for certificate management..."
+            
+            # Install easy-rsa package
+            if [ -f /etc/debian_version ]; then
+                apt-get update && apt-get install -y easy-rsa
+            elif [ -f /etc/redhat-release ]; then
+                yum install -y epel-release && yum install -y easy-rsa
+            fi
+            
+            # Copy easy-rsa files
+            mkdir -p /etc/openvpn/easy-rsa
+            if [ -d "/usr/share/easy-rsa" ]; then
+                cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+                print_success "EasyRSA installed"
+            else
+                print_error "Failed to install EasyRSA"
+                print_info "Please run: curl -fsSL $REPO_URL/scripts/setup-easyrsa.sh | sudo bash"
+                exit 1
+            fi
+        else
+            print_success "EasyRSA found"
+        fi
     fi
 }
 
@@ -152,25 +178,39 @@ install_openvpn_server() {
     echo ""
     sleep 3
     
-    # Download and run vpn-server.sh in interactive mode
-    curl -fsSL "$REPO_URL/scripts/vpn-server.sh" -o /tmp/vpn-server.sh
-    chmod +x /tmp/vpn-server.sh
+    # Download vpn-server.sh to /opt/vpn-agent (will be created later)
+    local vpn_script="/tmp/vpn-server.sh"
     
-    # Run the installer
-    if /tmp/vpn-server.sh install; then
-        print_success "OpenVPN server installed successfully"
+    if curl -fsSL "$REPO_URL/scripts/vpn-server.sh" -o "$vpn_script"; then
+        chmod +x "$vpn_script"
+        
+        # Run the installer
+        if "$vpn_script" install 2>&1; then
+            print_success "OpenVPN server installed successfully"
+            print_info "VPN server script will be saved to /opt/vpn-agent/vpn-server.sh"
+        else
+            print_error "OpenVPN installation failed"
+            print_info "You can install it manually later with:"
+            print_info "  curl -fsSL $REPO_URL/scripts/vpn-server.sh | sudo bash"
+            echo ""
+            read -p "Continue with agent setup anyway? [y/N]: " continue_anyway </dev/tty
+            if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+                print_error "Installation cancelled"
+                rm -f "$vpn_script"
+                exit 1
+            fi
+        fi
     else
-        print_error "OpenVPN installation failed"
-        print_info "You can install it manually later with:"
-        print_info "  curl -fsSL $REPO_URL/scripts/vpn-server.sh | sudo bash"
+        print_error "Failed to download vpn-server.sh"
+        print_info "You can install OpenVPN manually later"
         echo ""
         read -p "Continue with agent setup anyway? [y/N]: " continue_anyway </dev/tty
         if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+            print_error "Installation cancelled"
             exit 1
         fi
     fi
     
-    rm -f /tmp/vpn-server.sh
     echo ""
     print_info "Continuing with agent installation..."
     sleep 2
@@ -200,6 +240,21 @@ download_files() {
     else
         print_error "Failed to download .env template"
         exit 1
+    fi
+    
+    # Download vpn-server.sh for future use
+    if curl -fsSL "$REPO_URL/scripts/vpn-server.sh" -o vpn-server.sh; then
+        chmod +x vpn-server.sh
+        print_success "Downloaded vpn-server.sh"
+    else
+        print_warning "Failed to download vpn-server.sh (optional)"
+    fi
+    
+    # If vpn-server.sh was downloaded during OpenVPN installation, move it here
+    if [ -f "/tmp/vpn-server.sh" ]; then
+        mv /tmp/vpn-server.sh vpn-server.sh
+        chmod +x vpn-server.sh
+        print_success "Saved vpn-server.sh from installation"
     fi
 }
 
@@ -253,6 +308,11 @@ EOF
 )
     fi
     
+    # Debug: Show what we're sending (hide sensitive data)
+    if [ "$auth_method" == "key" ]; then
+        print_info "Sending registration request with key: ${auth_value:0:10}..."
+    fi
+    
     # Make API call
     if [ "$auth_method" == "jwt" ]; then
         response=$(curl -s -w "\n%{http_code}" -X POST "$manager_url/api/v1/nodes/register" \
@@ -284,9 +344,37 @@ EOF
             print_error "Failed to parse registration response"
             return 1
         fi
+    elif [ "$http_code" == "403" ]; then
+        print_error "Registration failed: Forbidden (HTTP 403)"
+        echo ""
+        if [ "$auth_method" == "jwt" ]; then
+            print_error "Invalid or expired JWT token"
+            print_info "Please get a fresh token from Web UI:"
+            print_info "1. Login as admin"
+            print_info "2. Open DevTools (F12) → Application → Local Storage"
+            print_info "3. Copy the 'token' value"
+        else
+            print_error "Invalid registration key or NODE_REGISTRATION_KEY not set"
+            print_info "Please check:"
+            print_info "1. Manager .env file has NODE_REGISTRATION_KEY set"
+            print_info "2. Manager API has been restarted after setting the key"
+            print_info "3. The registration key matches exactly"
+            echo ""
+            print_info "To set registration key on Manager:"
+            print_info "  echo 'NODE_REGISTRATION_KEY=your-secure-key' >> .env"
+            print_info "  docker compose restart api"
+        fi
+        return 1
+    elif [ "$http_code" == "409" ]; then
+        print_error "Registration failed: Conflict (HTTP 409)"
+        print_error "Node with this hostname or IP already exists"
+        print_info "Please use a different hostname or delete the existing node first"
+        return 1
     else
         print_error "Registration failed (HTTP $http_code)"
-        echo "$body" | grep -o '"message":"[^"]*' | cut -d'"' -f4
+        if [ -n "$body" ]; then
+            echo "$body" | grep -o '"message":"[^"]*' | cut -d'"' -f4
+        fi
         return 1
     fi
 }
@@ -636,8 +724,15 @@ print_summary() {
     echo "  Status:   $INSTALL_DIR/status.sh"
     echo ""
     echo -e "${BLUE}Configuration:${NC}"
-    echo "  Config file: $INSTALL_DIR/.env"
-    echo "  Credentials: $INSTALL_DIR/credentials.txt"
+    echo "  Config file:  $INSTALL_DIR/.env"
+    echo "  Credentials:  $INSTALL_DIR/credentials.txt"
+    echo "  VPN Script:   $INSTALL_DIR/vpn-server.sh"
+    echo ""
+    echo -e "${BLUE}VPN Server Management:${NC}"
+    echo "  Install/Reinstall: $INSTALL_DIR/vpn-server.sh install"
+    echo "  Add client:        $INSTALL_DIR/vpn-server.sh add-client"
+    echo "  Remove client:     $INSTALL_DIR/vpn-server.sh remove-client"
+    echo "  Uninstall:         $INSTALL_DIR/vpn-server.sh uninstall"
     echo ""
     echo -e "${YELLOW}⚠️  IMPORTANT:${NC}"
     echo "  1. Delete credentials.txt after saving them securely"
