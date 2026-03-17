@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Manual sync script: `scripts/sync-node-certs.sh`
   - Agent handler: `sync_certificates` task action
   - API endpoint: `POST /api/v1/nodes/sync-certs`
+  - UI: "Sync Certificates" button on each node card
   - Prevents "tls-crypt unwrap error" after server setup/changes
   - See `docs/CERTIFICATE-SYNC.md`
 

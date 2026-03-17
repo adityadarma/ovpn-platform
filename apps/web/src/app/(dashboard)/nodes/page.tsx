@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Plus, Trash2, MapPin, Clock, Activity, Server, X, Copy, CheckCircle2, Settings } from 'lucide-react'
+import { Plus, Trash2, MapPin, Clock, Activity, Server, X, Copy, CheckCircle2, Settings, RefreshCw } from 'lucide-react'
 import type { VpnNode } from '@ovpn/shared'
 import { Button } from '@/components/ui/button'
 
@@ -137,6 +137,19 @@ export default function NodesPage() {
       qc.invalidateQueries({ queryKey: ['nodes'] })
       setConfigNode(null)
       toast.success('Configuration updated successfully')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const syncCertsMutation = useMutation({
+    mutationFn: (nodeId: string) =>
+      api.post(`/api/v1/tasks`, {
+        node_id: nodeId,
+        action: 'sync_certificates',
+        payload: {}
+      }),
+    onSuccess: () => {
+      toast.success('Certificate sync task created. Check node logs for progress.')
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -282,6 +295,14 @@ export default function NodesPage() {
 
                 {/* Actions */}
                 <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-2 ml-7">
+                  <button
+                    onClick={() => syncCertsMutation.mutate(node.id)}
+                    disabled={syncCertsMutation.isPending || node.status === 'offline'}
+                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={node.status === 'offline' ? 'Node must be online' : 'Sync Certificates'}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${syncCertsMutation.isPending ? 'animate-spin' : ''}`} />
+                  </button>
                   <button
                     onClick={() => openConfigModal(node.id)}
                     className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"

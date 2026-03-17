@@ -32,6 +32,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ovpn-manager
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # Determine which services to build
