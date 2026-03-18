@@ -56,6 +56,11 @@ async function main() {
     process.exit(1)
   }
 
+  // Get client info from OpenVPN env vars
+  const realIp = process.env['untrusted_ip'] ?? process.env['trusted_ip'] ?? ''
+  const clientVersion = process.env['IV_VER'] ?? ''
+  const deviceName = process.env['IV_HWADDR'] ?? ''
+
   try {
     const res = await fetch(`${MANAGER_URL}/api/v1/vpn/auth`, {
       method: 'POST',
@@ -63,7 +68,14 @@ async function main() {
         'Content-Type': 'application/json',
         'X-VPN-Token': VPN_TOKEN!,
       },
-      body: JSON.stringify({ username, password, node_id: NODE_ID }),
+      body: JSON.stringify({ 
+        username, 
+        password, 
+        node_id: NODE_ID,
+        real_ip: realIp || undefined,
+        client_version: clientVersion || undefined,
+        device_name: deviceName || undefined,
+      }),
     })
 
     if (res.ok) {

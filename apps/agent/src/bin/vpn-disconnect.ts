@@ -58,6 +58,7 @@ async function main() {
         node_id: NODE_ID,
         bytes_sent: bytesSent,
         bytes_received: bytesReceived,
+        disconnect_reason: 'normal',
       }),
     })
 

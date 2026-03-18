@@ -39,6 +39,8 @@ const configFile = process.argv[2] ?? process.env['config']
 const username = process.env['common_name'] ?? ''
 const vpnIp = process.env['ifconfig_pool_remote_ip'] ?? ''
 const realIp = process.env['trusted_ip'] ?? ''
+const clientVersion = process.env['IV_VER'] ?? '' // OpenVPN client version
+const deviceName = process.env['IV_HWADDR'] ?? process.env['untrusted_ip'] ?? '' // Device identifier
 
 async function main() {
   if (!username || !vpnIp) {
@@ -59,6 +61,8 @@ async function main() {
         node_id: NODE_ID,
         real_ip: realIp,
         common_name: username,
+        client_version: clientVersion || undefined,
+        device_name: deviceName || undefined,
       }),
     })
 
