@@ -15,6 +15,7 @@
 #
 # Environment Variables (for automation):
 #   MANAGER_URL          - Manager API URL (required)
+#   VPN_TOKEN            - VPN hooks authentication token (required, must match Manager)
 #   REG_KEY              - Registration key for auto-registration
 #   JWT_TOKEN            - Admin JWT token for auto-registration (alternative to REG_KEY)
 #   NODE_ID              - Node ID for manual registration
@@ -450,6 +451,14 @@ configure_env() {
             print_info "Using provided Node ID and Secret Token"
         fi
         
+        # VPN_TOKEN is required in automated mode
+        if [ -z "$VPN_TOKEN" ]; then
+            print_error "VPN_TOKEN environment variable is required"
+            print_info "Set VPN_TOKEN before running this script:"
+            print_info "  export VPN_TOKEN=your-token-here"
+            exit 1
+        fi
+        
         POLL_INTERVAL=${POLL_INTERVAL:-5000}
         HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30000}
     else
@@ -465,6 +474,18 @@ configure_env() {
         while [ -z "$MANAGER_URL" ]; do
             print_error "Manager URL is required"
             read -p "Enter Manager API URL: " MANAGER_URL </dev/tty
+        done
+        
+        # Get VPN_TOKEN
+        echo ""
+        print_info "VPN_TOKEN is required for VPN hooks authentication"
+        print_info "This token must match the VPN_TOKEN in Manager API .env file"
+        print_info "Get it from Manager server: grep VPN_TOKEN .env"
+        echo ""
+        read -p "Enter VPN_TOKEN: " VPN_TOKEN </dev/tty
+        while [ -z "$VPN_TOKEN" ]; do
+            print_error "VPN_TOKEN is required"
+            read -p "Enter VPN_TOKEN: " VPN_TOKEN </dev/tty
         done
         
         # Check if auto-registration is available
@@ -577,6 +598,7 @@ configure_env() {
     sed -i "s|AGENT_MANAGER_URL=.*|AGENT_MANAGER_URL=$MANAGER_URL|g" .env
     sed -i "s|AGENT_NODE_ID=.*|AGENT_NODE_ID=$NODE_ID|g" .env
     sed -i "s|AGENT_SECRET_TOKEN=.*|AGENT_SECRET_TOKEN=$SECRET_TOKEN|g" .env
+    sed -i "s|VPN_TOKEN=.*|VPN_TOKEN=$VPN_TOKEN|g" .env
     sed -i "s|AGENT_POLL_INTERVAL_MS=.*|AGENT_POLL_INTERVAL_MS=$POLL_INTERVAL|g" .env
     sed -i "s|AGENT_HEARTBEAT_INTERVAL_MS=.*|AGENT_HEARTBEAT_INTERVAL_MS=$HEARTBEAT_INTERVAL|g" .env
     sed -i "s|NODE_ENV=.*|NODE_ENV=production|g" .env
@@ -593,6 +615,7 @@ Generated on $(date)
 Manager URL: $MANAGER_URL
 Node ID: $NODE_ID
 Secret Token: $SECRET_TOKEN
+VPN Token: $VPN_TOKEN
 
 Poll Interval: $POLL_INTERVAL ms
 Heartbeat Interval: $HEARTBEAT_INTERVAL ms
@@ -604,6 +627,7 @@ EOF
 
     chmod 600 credentials.txt
     print_success "Credentials saved to: $INSTALL_DIR/credentials.txt"
+    rm .env.template
 }
 
 pull_image() {

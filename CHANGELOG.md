@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **VPN Hooks Authentication**: Added `VPN_TOKEN` environment variable for secure VPN hook authentication
+  - Token used by OpenVPN hooks (vpn-login, vpn-connect, vpn-disconnect) to authenticate with Manager API
+  - Sent as `X-VPN-Token` header in all `/api/v1/vpn/*` requests
+  - Must be the same on Manager API and Agent/Hooks for authentication to work
+  - Generate with: `openssl rand -hex 32`
+  - Added to `.env.example`, `.env.production`, and all `docker-compose*.yml` files
+  - Install script (`install-agent.sh`) now prompts for VPN_TOKEN during installation
 - **Enhanced Session Logging**: Comprehensive session tracking and monitoring
   - Added `last_activity_at`, `disconnect_reason`, `client_version`, `device_name`, `geo_country`, `geo_city`, `connection_duration_seconds` to `vpn_sessions`
   - New `session_activities` table for periodic bandwidth and connection quality metrics
