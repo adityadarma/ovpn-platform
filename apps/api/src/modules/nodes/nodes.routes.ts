@@ -38,6 +38,85 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
     },
   )
 
+  // PUT /api/v1/nodes/:id
+  app.put<{ Params: { id: string }; Body: { hostname?: string; ip_address?: string; region?: string } }>(
+    '/nodes/:id',
+    { 
+      onRequest: [app.authenticateAdmin], 
+      schema: { 
+        tags: ['nodes'], 
+        summary: 'Update node basic information', 
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          properties: {
+            hostname: { type: 'string', description: 'Node hostname' },
+            ip_address: { type: 'string', description: 'Node IP address' },
+            region: { type: 'string', description: 'Node region/location' }
+          }
+        }
+      } 
+    },
+    async (request, reply) => {
+      const node = await app.db('vpn_nodes').where({ id: request.params.id }).first()
+      if (!node) {
+        return reply.status(404).send({ error: 'Not Found', message: 'Node not found' })
+      }
+
+      const updates: any = {}
+      
+      if (request.body.hostname !== undefined) {
+        // Check if hostname already exists (excluding current node)
+        const existing = await app.db('vpn_nodes')
+          .where({ hostname: request.body.hostname })
+          .whereNot({ id: request.params.id })
+          .first()
+        
+        if (existing) {
+          return reply.status(409).send({ 
+            error: 'Conflict', 
+            message: 'Hostname already exists' 
+          })
+        }
+        updates.hostname = request.body.hostname
+      }
+      
+      if (request.body.ip_address !== undefined) {
+        // Check if IP already exists (excluding current node)
+        const existing = await app.db('vpn_nodes')
+          .where({ ip_address: request.body.ip_address })
+          .whereNot({ id: request.params.id })
+          .first()
+        
+        if (existing) {
+          return reply.status(409).send({ 
+            error: 'Conflict', 
+            message: 'IP address already exists' 
+          })
+        }
+        updates.ip_address = request.body.ip_address
+      }
+      
+      if (request.body.region !== undefined) {
+        updates.region = request.body.region || null
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return reply.status(400).send({ 
+          error: 'Bad Request', 
+          message: 'No valid fields to update' 
+        })
+      }
+
+      await app.db('vpn_nodes').where({ id: request.params.id }).update(updates)
+
+      const updated = await app.db('vpn_nodes').where({ id: request.params.id }).first()
+      const { token: _token, ...safeNode } = updated
+
+      return safeNode
+    },
+  )
+
   // GET /api/v1/nodes/:id/config
   app.get<{ Params: { id: string } }>(
     '/nodes/:id/config',

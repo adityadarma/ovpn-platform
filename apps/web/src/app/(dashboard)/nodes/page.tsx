@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Plus, Trash2, MapPin, Clock, Activity, Server, X, Copy, CheckCircle2, Settings, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, MapPin, Clock, Activity, Server, X, Copy, CheckCircle2, Settings, RefreshCw, Edit } from 'lucide-react'
 import type { VpnNode } from '@vpn/shared'
 import { Button } from '@/components/ui/button'
 
@@ -42,6 +42,8 @@ export default function NodesPage() {
   const [copied, setCopied] = useState(false)
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())
   const [configNode, setConfigNode] = useState<string | null>(null)
+  const [editNode, setEditNode] = useState<VpnNode | null>(null)
+  const [editForm, setEditForm] = useState<NodeForm>({ hostname: '', ipAddress: '', region: '' })
   const [nodeConfig, setNodeConfig] = useState<NodeConfig>({
     port: 1194,
     protocol: 'udp',
@@ -153,6 +155,38 @@ export default function NodesPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   })
+
+  const openEditModal = (node: VpnNode) => {
+    setEditNode(node)
+    setEditForm({
+      hostname: node.hostname,
+      ipAddress: node.ip_address,
+      region: node.region || ''
+    })
+  }
+
+  const updateNodeMutation = useMutation({
+    mutationFn: (data: { nodeId: string; updates: Partial<NodeForm> }) =>
+      api.put(`/api/v1/nodes/${data.nodeId}`, {
+        hostname: data.updates.hostname,
+        ip_address: data.updates.ipAddress,
+        region: data.updates.region || null
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['nodes'] })
+      setEditNode(null)
+      toast.success('Node updated successfully')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const handleUpdateNode = () => {
+    if (!editNode) return
+    updateNodeMutation.mutate({
+      nodeId: editNode.id,
+      updates: editForm
+    })
+  }
 
   const toggleNode = (nodeId: string) => {
     const newSelected = new Set(selectedNodes)
@@ -304,6 +338,13 @@ export default function NodesPage() {
                     <RefreshCw className={`h-4 w-4 ${syncCertsMutation.isPending ? 'animate-spin' : ''}`} />
                   </button>
                   <button
+                    onClick={() => openEditModal(node)}
+                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Edit Node"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </button>
+                  <button
                     onClick={() => openConfigModal(node.id)}
                     className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                     title="Configure"
@@ -433,6 +474,77 @@ export default function NodesPage() {
                 </form>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Node Modal */}
+      {editNode && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-gray-900">Edit Node</h2>
+                <p className="text-sm text-gray-400 mt-0.5">Update node information</p>
+              </div>
+              <button onClick={() => setEditNode(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={e => { e.preventDefault(); handleUpdateNode() }}
+              className="p-5 space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Hostname <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={editForm.hostname}
+                  onChange={e => setEditForm({ ...editForm, hostname: e.target.value })}
+                  placeholder="vpn-node-1"
+                  required
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">IP Address <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={editForm.ipAddress}
+                  onChange={e => setEditForm({ ...editForm, ipAddress: e.target.value })}
+                  placeholder="203.0.113.1"
+                  required
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Region</label>
+                <input
+                  type="text"
+                  value={editForm.region}
+                  onChange={e => setEditForm({ ...editForm, region: e.target.value })}
+                  placeholder="Singapore"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditNode(null)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={updateNodeMutation.isPending}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {updateNodeMutation.isPending ? 'Updating...' : 'Update Node'}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

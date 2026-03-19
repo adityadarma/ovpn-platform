@@ -1,14 +1,33 @@
 #!/bin/bash
 
-set -e
+# Disable exit on error for better error handling
+# set -e
 
 # ==========================================
 # VPN Manager - VPN Node Auto Installer
 # ==========================================
 
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}" >&2
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
 # Make sure only root can run our script
 if [ "$(id -u)" != "0" ]; then
-   echo "This script must be run as root" 1>&2
+   print_error "This script must be run as root"
    exit 1
 fi
 
@@ -102,7 +121,7 @@ PUBLIC_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "YOUR_SERVER_IP
 
 install_vpn() {
     if [ -d "/etc/openvpn/server" ] && [ -f "/etc/openvpn/server/server.conf" ]; then
-        echo "OpenVPN is already installed. Use '$0 uninstall' first if you want to reinstall."
+        print_warning "OpenVPN is already installed. Use '$0 uninstall' first if you want to reinstall."
         exit 1
     fi
 
@@ -111,16 +130,33 @@ install_vpn() {
     echo "================================="
 
     # Install packages
+    print_success "Installing packages..."
     if [[ "$OS" == "ubuntu" || "$OS" == "debian" ]]; then
-        apt-get update -y
-        apt-get install -y openvpn easy-rsa iptables curl wget tar
+        if ! apt-get update -y; then
+            print_error "Failed to update package list"
+            print_error "Check your internet connection and try: apt-get update"
+            exit 1
+        fi
+        
+        if ! apt-get install -y openvpn easy-rsa iptables curl wget tar; then
+            print_error "Failed to install required packages"
+            print_error "Try manually: apt-get install -y openvpn easy-rsa iptables curl wget tar"
+            exit 1
+        fi
     elif [[ "$OS" == "centos" || "$OS" == "rhel" || "$OS" == "fedora" || "$OS" == "rocky" || "$OS" == "almalinux" ]]; then
         yum install -y epel-release || true
-        yum install -y openvpn easy-rsa iptables curl wget tar
+        
+        if ! yum install -y openvpn easy-rsa iptables curl wget tar; then
+            print_error "Failed to install required packages"
+            print_error "Try manually: yum install -y openvpn easy-rsa iptables curl wget tar"
+            exit 1
+        fi
     else
-        echo "Unsupported OS: $OS. Please use Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky, or AlmaLinux."
+        print_error "Unsupported OS: $OS. Please use Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky, or AlmaLinux."
         exit 1
     fi
+    
+    print_success "Packages installed"
 
     echo "================================="
     echo "Configuring PKI (EasyRSA)"
@@ -130,27 +166,60 @@ install_vpn() {
     mkdir -p /etc/openvpn/easy-rsa
     if [ -d "/usr/share/easy-rsa" ]; then
         cp -r /usr/share/easy-rsa/* /etc/openvpn/easy-rsa/
+        print_success "EasyRSA copied"
     else
-        echo "EasyRSA not found in /usr/share/easy-rsa. Exiting."
+        print_error "EasyRSA not found in /usr/share/easy-rsa"
+        print_error "Package installation may have failed"
         exit 1
     fi
     
     cd /etc/openvpn/easy-rsa
 
     # Generate PKI and Certificates
-    ./easyrsa init-pki
-    EASYRSA_BATCH=1 ./easyrsa build-ca nopass
-    EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass
-    EASYRSA_BATCH=1 ./easyrsa gen-dh
+    print_success "Initializing PKI..."
+    if ! ./easyrsa init-pki; then
+        print_error "Failed to initialize PKI"
+        exit 1
+    fi
+    
+    print_success "Building CA..."
+    if ! EASYRSA_BATCH=1 ./easyrsa build-ca nopass; then
+        print_error "Failed to build CA"
+        exit 1
+    fi
+    
+    print_success "Building server certificate..."
+    if ! EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass; then
+        print_error "Failed to build server certificate"
+        exit 1
+    fi
+    
+    print_success "Generating DH parameters (this may take a while)..."
+    if ! EASYRSA_BATCH=1 ./easyrsa gen-dh; then
+        print_error "Failed to generate DH parameters"
+        exit 1
+    fi
     
     # Create server directory before generating keys
     mkdir -p /etc/openvpn/server
-    mkdir -p /var/log/openvpn && chown nobody:nogroup /var/log/openvpn
+    mkdir -p /var/log/openvpn
+    
+    # Fix permissions based on OS
+    if [[ "$OS" == "ubuntu" || "$OS" == "debian" ]]; then
+        chown nobody:nogroup /var/log/openvpn || true
+    else
+        chown nobody:nobody /var/log/openvpn || true
+    fi
     
     # Generate TLS-Crypt Key (more secure than tls-auth)
-    openvpn --genkey secret /etc/openvpn/server/tls-crypt.key
+    print_success "Generating TLS-Crypt key..."
+    if ! openvpn --genkey secret /etc/openvpn/server/tls-crypt.key; then
+        print_error "Failed to generate TLS-Crypt key"
+        exit 1
+    fi
 
     # Move files to openvpn server directory
+    print_success "Copying certificates..."
     cp pki/ca.crt /etc/openvpn/server/
     cp pki/private/server.key /etc/openvpn/server/
     cp pki/issued/server.crt /etc/openvpn/server/
@@ -249,17 +318,23 @@ EOF
 
     chmod 644 /etc/openvpn/server/install-config.json
     chmod 644 /etc/openvpn/server/install-config.txt
+    
+    print_success "Configuration files created"
 
     echo "================================="
     echo "Configuring Networking (NAT & Forwarding)"
     echo "================================="
 
     # Enable IP forwarding
+    print_success "Enabling IP forwarding..."
     sed -i '/net.ipv4.ip_forward/d' /etc/sysctl.conf
     echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-    sysctl -p
+    if ! sysctl -p > /dev/null 2>&1; then
+        print_warning "Failed to apply sysctl settings (non-fatal)"
+    fi
 
     # Setup NAT using iptables service
+    print_success "Setting up NAT rules..."
     cat <<EOF > /etc/systemd/system/openvpn-iptables.service
 [Unit]
 Before=network.target
@@ -273,12 +348,38 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable --now openvpn-iptables.service
+    if ! systemctl enable --now openvpn-iptables.service; then
+        print_warning "Failed to enable iptables service (non-fatal)"
+    fi
 
     # Start OpenVPN Service
-    echo "Starting OpenVPN service..."
-    systemctl enable openvpn-server@server.service 2>/dev/null || systemctl enable openvpn@server.service 2>/dev/null
-    systemctl restart openvpn-server@server.service 2>/dev/null || systemctl restart openvpn@server.service 2>/dev/null
+    echo "================================="
+    echo "Starting OpenVPN Service"
+    echo "================================="
+    
+    print_success "Enabling OpenVPN service..."
+    if ! systemctl enable openvpn-server@server.service 2>/dev/null && ! systemctl enable openvpn@server.service 2>/dev/null; then
+        print_error "Failed to enable OpenVPN service"
+        print_error "Try manually: systemctl enable openvpn-server@server"
+        exit 1
+    fi
+    
+    print_success "Starting OpenVPN service..."
+    if ! systemctl restart openvpn-server@server.service 2>/dev/null && ! systemctl restart openvpn@server.service 2>/dev/null; then
+        print_error "Failed to start OpenVPN service"
+        print_error "Check logs: journalctl -u openvpn-server@server -n 50"
+        exit 1
+    fi
+    
+    # Wait a bit and check if service is running
+    sleep 2
+    if systemctl is-active --quiet openvpn-server@server.service 2>/dev/null || systemctl is-active --quiet openvpn@server.service 2>/dev/null; then
+        print_success "OpenVPN service is running"
+    else
+        print_error "OpenVPN service failed to start"
+        print_error "Check logs: journalctl -u openvpn-server@server -n 50"
+        exit 1
+    fi
     
     # Wait a moment for service to start
     sleep 2

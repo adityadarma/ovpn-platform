@@ -5,13 +5,26 @@
 # This script installs only the Agent on a VPN node server
 # 
 # Usage:
-#   Interactive: curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
+#   Interactive (recommended):
+#     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh -o install-agent.sh
+#     chmod +x install-agent.sh
+#     sudo ./install-agent.sh
+#   
+#   One-liner (if OpenVPN already installed):
+#     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
 #   
 #   Automated (with env vars):
 #     MANAGER_URL=http://manager:3001 \
+#     VPN_TOKEN=your-token \
 #     REG_KEY=your-key \
 #     SKIP_OPENVPN=yes \
 #     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
+#
+# IMPORTANT: If OpenVPN is not installed and you want to install it interactively,
+#            download the script first instead of piping to bash:
+#              curl -fsSL https://raw.githubusercontent.com/.../install-agent.sh -o install-agent.sh
+#              chmod +x install-agent.sh
+#              sudo ./install-agent.sh
 #
 # Environment Variables (for automation):
 #   MANAGER_URL          - Manager API URL (required)
@@ -105,10 +118,31 @@ check_openvpn() {
         print_info "The agent requires OpenVPN to be installed on this server"
         echo ""
         print_info "Options:"
-        echo "  1. Install OpenVPN now (interactive setup)"
+        echo "  1. Install OpenVPN now (interactive setup - requires terminal input)"
         echo "  2. Skip OpenVPN installation (I'll install it manually later)"
         echo "  3. Exit (OpenVPN is already installed elsewhere)"
         echo ""
+        
+        # Check if we're running in a pipe (stdin is not a terminal)
+        if [ ! -t 0 ]; then
+            print_warning "Script is running in non-interactive mode (piped from curl)"
+            print_warning "Cannot install OpenVPN interactively in this mode"
+            echo ""
+            print_info "To install OpenVPN interactively, download and run the script:"
+            print_info "  curl -fsSL $REPO_URL/scripts/install-agent.sh -o install-agent.sh"
+            print_info "  chmod +x install-agent.sh"
+            print_info "  sudo ./install-agent.sh"
+            echo ""
+            print_info "Or install OpenVPN separately first:"
+            print_info "  curl -fsSL $REPO_URL/scripts/vpn-server.sh -o vpn-server.sh"
+            print_info "  chmod +x vpn-server.sh"
+            print_info "  sudo ./vpn-server.sh install"
+            echo ""
+            print_info "Defaulting to option 2 (skip OpenVPN installation)"
+            sleep 3
+            return 0
+        fi
+        
         read -p "Choose option [1/2/3]: " install_option </dev/tty
         
         case "$install_option" in
@@ -122,7 +156,7 @@ check_openvpn() {
             2)
                 print_warning "Skipping OpenVPN installation"
                 print_info "Please install OpenVPN manually before starting the agent"
-                print_info "You can use: curl -fsSL $REPO_URL/scripts/vpn-server.sh | sudo bash"
+                print_info "You can use: curl -fsSL $REPO_URL/scripts/vpn-server.sh -o vpn-server.sh && chmod +x vpn-server.sh && sudo ./vpn-server.sh install"
                 echo ""
                 read -p "Press Enter to continue with agent setup..." </dev/tty
                 ;;
@@ -170,44 +204,77 @@ install_openvpn_server() {
     print_info "Installing OpenVPN server..."
     echo ""
     print_warning "The OpenVPN installer will ask you several questions:"
-    print_info "- Server IP address"
-    print_info "- Port and protocol"
-    print_info "- DNS servers"
-    print_info "- Client name (you can skip this)"
+    print_info "- Port (default: 1194)"
+    print_info "- Protocol: UDP (faster) or TCP (more reliable)"
+    print_info "- Tunnel mode: Split (recommended) or Full"
+    print_info "- VPN network (default: 10.8.0.0)"
     echo ""
     print_info "After installation completes, this script will continue with agent setup"
     echo ""
-    sleep 3
+    read -p "Press Enter to start OpenVPN installation..." </dev/tty
     
-    # Download vpn-server.sh to /opt/vpn-agent (will be created later)
+    # Download vpn-server.sh
     local vpn_script="/tmp/vpn-server.sh"
     
-    if curl -fsSL "$REPO_URL/scripts/vpn-server.sh" -o "$vpn_script"; then
-        chmod +x "$vpn_script"
-        
-        # Run the installer
-        if "$vpn_script" install 2>&1; then
-            print_success "OpenVPN server installed successfully"
-            print_info "VPN server script will be saved to /opt/vpn-agent/vpn-server.sh"
-        else
-            print_error "OpenVPN installation failed"
-            print_info "You can install it manually later with:"
-            print_info "  curl -fsSL $REPO_URL/scripts/vpn-server.sh | sudo bash"
-            echo ""
-            read -p "Continue with agent setup anyway? [y/N]: " continue_anyway </dev/tty
-            if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
-                print_error "Installation cancelled"
-                rm -f "$vpn_script"
-                exit 1
-            fi
-        fi
-    else
+    print_info "Downloading VPN server installer..."
+    if ! curl -fsSL "$REPO_URL/scripts/vpn-server.sh" -o "$vpn_script"; then
         print_error "Failed to download vpn-server.sh"
         print_info "You can install OpenVPN manually later"
         echo ""
         read -p "Continue with agent setup anyway? [y/N]: " continue_anyway </dev/tty
         if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
             print_error "Installation cancelled"
+            exit 1
+        fi
+        return 0
+    fi
+    
+    chmod +x "$vpn_script"
+    print_success "Installer downloaded"
+    echo ""
+    
+    # Run the installer interactively
+    # We need to redirect stdin from /dev/tty so the script can read user input
+    print_info "Starting OpenVPN installation (interactive)..."
+    echo ""
+    
+    if "$vpn_script" install < /dev/tty 2>&1 | tee /tmp/vpn-install.log; then
+        print_success "OpenVPN server installed successfully"
+        
+        # Move script to /opt/vpn-agent for future use
+        if [ ! -d "/opt/vpn-agent" ]; then
+            mkdir -p /opt/vpn-agent
+        fi
+        mv "$vpn_script" /opt/vpn-agent/vpn-server.sh
+        print_info "VPN server script saved to /opt/vpn-agent/vpn-server.sh"
+    else
+        local exit_code=$?
+        print_error "OpenVPN installation failed (exit code: $exit_code)"
+        echo ""
+        print_info "Installation log saved to: /tmp/vpn-install.log"
+        
+        # Show last lines of log
+        if [ -f /tmp/vpn-install.log ]; then
+            print_info "Last 20 lines of log:"
+            tail -20 /tmp/vpn-install.log
+        fi
+        
+        echo ""
+        print_info "Common issues:"
+        print_info "  1. Network connectivity - check internet connection"
+        print_info "  2. Package manager issues - try: apt-get update"
+        print_info "  3. Insufficient disk space - check: df -h"
+        print_info "  4. EasyRSA not available - check package repositories"
+        echo ""
+        print_info "You can install OpenVPN manually later with:"
+        print_info "  curl -fsSL $REPO_URL/scripts/vpn-server.sh -o /tmp/vpn-server.sh"
+        print_info "  chmod +x /tmp/vpn-server.sh"
+        print_info "  /tmp/vpn-server.sh install"
+        echo ""
+        read -p "Continue with agent setup anyway? [y/N]: " continue_anyway </dev/tty
+        if [[ "$continue_anyway" != "y" && "$continue_anyway" != "Y" ]]; then
+            print_error "Installation cancelled"
+            rm -f "$vpn_script"
             exit 1
         fi
     fi
