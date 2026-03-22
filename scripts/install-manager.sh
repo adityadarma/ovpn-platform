@@ -791,22 +791,25 @@ main() {
     download_files
     configure_env
     
-    # Install OpenVPN if all-in-one mode
+    # Install OpenVPN if all-in-one mode (but don't add agent to compose yet)
     if [ "$INSTALL_AGENT" = true ]; then
         install_openvpn
-        add_agent_to_compose
     fi
     
     pull_images
     start_services
     wait_for_health
     
-    # Register node and install hooks if all-in-one mode
+    # Register node and setup agent if all-in-one mode
     if [ "$INSTALL_AGENT" = true ]; then
         register_node
         
-        # Restart agent with new credentials
-        docker compose restart agent
+        # Now add agent to compose with proper credentials
+        add_agent_to_compose
+        
+        # Start agent
+        print_info "Starting agent..."
+        docker compose up -d agent
         sleep 5
         
         install_vpn_hooks
