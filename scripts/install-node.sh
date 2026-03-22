@@ -8,7 +8,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install.sh | sudo bash
 #
 # Environment Variables (for automation):
-#   MANAGER_URL    - Manager API URL (required)
+#   AGENT_MANAGER_URL or MANAGER_URL - Manager API URL (required)
 #   VPN_TOKEN      - VPN authentication token (required)
 #   REG_KEY        - Registration key (optional, for auto-register)
 #   NODE_ID        - Node ID (optional, for manual register)
@@ -171,6 +171,9 @@ curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/docker
 curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/.env.agent -o .env
 ok "Files downloaded"
 
+# Support both AGENT_MANAGER_URL and MANAGER_URL
+MANAGER_URL=${AGENT_MANAGER_URL:-$MANAGER_URL}
+
 # Configure environment
 if [ -n "$MANAGER_URL" ] && [ -n "$VPN_TOKEN" ]; then
     info "Configuring agent (automated mode)..."
@@ -201,12 +204,40 @@ if [ -n "$MANAGER_URL" ] && [ -n "$VPN_TOKEN" ]; then
     [ -z "$NODE_ID" ] && { err "NODE_ID required"; exit 1; }
     [ -z "$SECRET_TOKEN" ] && { err "SECRET_TOKEN required"; exit 1; }
     
-    # Update .env
-    sed -i "s|AGENT_MANAGER_URL=.*|AGENT_MANAGER_URL=$MANAGER_URL|" .env
-    sed -i "s|AGENT_NODE_ID=.*|AGENT_NODE_ID=$NODE_ID|" .env
-    sed -i "s|AGENT_SECRET_TOKEN=.*|AGENT_SECRET_TOKEN=$SECRET_TOKEN|" .env
-    sed -i "s|VPN_TOKEN=.*|VPN_TOKEN=$VPN_TOKEN|" .env
-    sed -i "s|NODE_ENV=.*|NODE_ENV=production|" .env
+    # Update .env with proper escaping
+    cat > .env <<EOF
+# ============================================================
+# VPN Manager — Agent Configuration (Standalone Deployment)
+# ============================================================
+# Generated on $(date)
+# ============================================================
+
+# Node Environment
+NODE_ENV=production
+
+# Manager API Connection
+AGENT_MANAGER_URL=$MANAGER_URL
+AGENT_NODE_ID=$NODE_ID
+AGENT_SECRET_TOKEN=$SECRET_TOKEN
+
+# VPN Token (for authentication)
+VPN_TOKEN=$VPN_TOKEN
+
+# Polling & Heartbeat Intervals (milliseconds)
+AGENT_POLL_INTERVAL_MS=5000
+AGENT_HEARTBEAT_INTERVAL_MS=30000
+
+# VPN Type Selection (openvpn | wireguard)
+VPN_TYPE=openvpn
+
+# OpenVPN Management Interface (for VPN_TYPE=openvpn)
+VPN_MANAGEMENT_HOST=127.0.0.1
+VPN_MANAGEMENT_PORT=7505
+VPN_MANAGEMENT_PASSWORD=
+
+# WireGuard Settings (for VPN_TYPE=wireguard)
+WIREGUARD_INTERFACE=wg0
+EOF
     
     ok "Agent configured"
 else
@@ -217,11 +248,40 @@ else
     read -p "Node ID: " NODE_ID
     read -p "Secret Token: " SECRET_TOKEN
     
-    sed -i "s|AGENT_MANAGER_URL=.*|AGENT_MANAGER_URL=$MANAGER_URL|" .env
-    sed -i "s|AGENT_NODE_ID=.*|AGENT_NODE_ID=$NODE_ID|" .env
-    sed -i "s|AGENT_SECRET_TOKEN=.*|AGENT_SECRET_TOKEN=$SECRET_TOKEN|" .env
-    sed -i "s|VPN_TOKEN=.*|VPN_TOKEN=$VPN_TOKEN|" .env
-    sed -i "s|NODE_ENV=.*|NODE_ENV=production|" .env
+    # Create .env with proper values
+    cat > .env <<EOF
+# ============================================================
+# VPN Manager — Agent Configuration (Standalone Deployment)
+# ============================================================
+# Generated on $(date)
+# ============================================================
+
+# Node Environment
+NODE_ENV=production
+
+# Manager API Connection
+AGENT_MANAGER_URL=$MANAGER_URL
+AGENT_NODE_ID=$NODE_ID
+AGENT_SECRET_TOKEN=$SECRET_TOKEN
+
+# VPN Token (for authentication)
+VPN_TOKEN=$VPN_TOKEN
+
+# Polling & Heartbeat Intervals (milliseconds)
+AGENT_POLL_INTERVAL_MS=5000
+AGENT_HEARTBEAT_INTERVAL_MS=30000
+
+# VPN Type Selection (openvpn | wireguard)
+VPN_TYPE=openvpn
+
+# OpenVPN Management Interface (for VPN_TYPE=openvpn)
+VPN_MANAGEMENT_HOST=127.0.0.1
+VPN_MANAGEMENT_PORT=7505
+VPN_MANAGEMENT_PASSWORD=
+
+# WireGuard Settings (for VPN_TYPE=wireguard)
+WIREGUARD_INTERFACE=wg0
+EOF
 fi
 
 # Start agent
