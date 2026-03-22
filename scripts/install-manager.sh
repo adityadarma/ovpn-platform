@@ -3,7 +3,7 @@
 # VPN Manager - Production Installation Script
 # ============================================================
 # This script installs VPN Manager without cloning the repo
-# Usage: curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-prod.sh | sudo bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
 # ============================================================
 
 set -e
@@ -614,20 +614,39 @@ register_node() {
         export NODE_ID
         export SECRET_TOKEN
     elif [ "$HTTP_CODE" == "409" ]; then
-        # Node already exists - this is OK for reinstallation
-        print_warning "Node already registered (reinstallation detected)"
-        
+        # Node already exists - need to delete old node first
+        print_warning "Node already registered with this hostname/IP"
         echo ""
-        echo "Please provide existing node credentials:"
-        echo "You can find these in Web UI → Nodes → Select your node"
+        echo "For reinstallation, you have 2 options:"
+        echo ""
+        echo "Option 1 (Recommended): Delete old node and retry"
+        echo "  1. Login to Web UI: $WEB_URL_VALUE"
+        echo "  2. Go to: Nodes → Find your node → Delete"
+        echo "  3. Run this installation again"
+        echo ""
+        echo "Option 2: Use existing node credentials (if you saved them)"
+        echo "  Enter Node ID and Secret Token from initial registration"
+        echo ""
+        read -p "Do you have existing node credentials? (yes/no): " have_creds </dev/tty
+        
+        if [ "$have_creds" != "yes" ]; then
+            print_error "Please delete the old node in Web UI first, then retry installation"
+            echo ""
+            echo "Steps:"
+            echo "  1. Login to Web UI: $WEB_URL_VALUE"
+            echo "  2. Go to: Nodes"
+            echo "  3. Find node with hostname: $HOSTNAME or IP: $SERVER_IP"
+            echo "  4. Click Delete"
+            echo "  5. Run installation again"
+            return 1
+        fi
+        
         echo ""
         read -p "Node ID: " NODE_ID </dev/tty
         read -p "Secret Token: " SECRET_TOKEN </dev/tty
         
         if [ -z "$NODE_ID" ] || [ -z "$SECRET_TOKEN" ]; then
             print_error "Node ID and Secret Token are required"
-            echo ""
-            echo "Alternative: Delete the existing node in Web UI first, then retry installation"
             return 1
         fi
         

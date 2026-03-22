@@ -280,7 +280,7 @@ docker compose up -d
 **Option 2: Without Repository (Pre-built Images)** ⭐ Recommended
 ```bash
 # One-line install
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-prod.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
 
 # Or manual
 wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/docker-compose.yml

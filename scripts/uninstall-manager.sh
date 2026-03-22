@@ -291,7 +291,7 @@ print_summary() {
     echo "  - SSL certificates: /etc/letsencrypt/live/yourdomain.com"
     echo ""
     echo -e "${BLUE}To reinstall:${NC}"
-    echo "  curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-prod.sh | sudo bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash"
     echo ""
 }
 
