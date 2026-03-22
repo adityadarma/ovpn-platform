@@ -168,8 +168,8 @@ persist-tun
 user nobody
 group nogroup
 
-# Management Interface
-management 127.0.0.1 7505
+# Management Interface (bind to all interfaces for Docker access)
+management 0.0.0.0 7505
 management-client-auth
 
 status /var/log/openvpn/status.log
@@ -177,7 +177,6 @@ status-version 3
 log /var/log/openvpn/openvpn.log
 verb 3
 
-# VPN Hooks
 script-security 2
 EOF
     
@@ -392,6 +391,9 @@ EOF
 
     # Add agent configuration if all-in-one mode
     if [ "$INSTALL_AGENT" = true ]; then
+        # Get host IP for Docker to access
+        HOST_IP=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' || echo "172.17.0.1")
+        
         cat >> .env << EOF
 
 # ---- Agent (All-in-One Mode) ----
@@ -400,7 +402,7 @@ AGENT_NODE_ID=pending-registration
 AGENT_SECRET_TOKEN=pending-registration
 AGENT_POLL_INTERVAL_MS=5000
 AGENT_HEARTBEAT_INTERVAL_MS=30000
-VPN_MANAGEMENT_HOST=host.docker.internal
+VPN_MANAGEMENT_HOST=$HOST_IP
 VPN_MANAGEMENT_PORT=7505
 VPN_MANAGEMENT_PASSWORD=
 VPN_TYPE=openvpn

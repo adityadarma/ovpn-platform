@@ -119,8 +119,8 @@ persist-tun
 user nobody
 group nogroup
 
-# Management Interface (v2.0)
-management 127.0.0.1 7505
+# Management Interface (v2.0) - bind to 0.0.0.0 for Docker access
+management 0.0.0.0 7505
 management-client-auth
 
 status /var/log/openvpn/status.log
@@ -128,7 +128,6 @@ status-version 3
 log /var/log/openvpn/openvpn.log
 verb 3
 
-# VPN Hooks (will be configured by agent)
 script-security 2
 EOF
     
