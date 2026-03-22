@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import type { VpnDriver } from '../drivers'
 
 interface UpdateServerConfigParams {
   vpnPort: number
@@ -16,7 +17,7 @@ interface UpdateServerConfigParams {
   customServerConfig?: string
 }
 
-export async function handleUpdateServerConfig(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function handleUpdateServerConfig(params: Record<string, unknown>, driver: VpnDriver): Promise<Record<string, unknown>> {
   const config = params as unknown as UpdateServerConfigParams
 
   const CONFIG_PATH = '/etc/openvpn/server/server.conf'
@@ -90,8 +91,13 @@ persist-tun
 user nobody
 group nogroup
 
+# Management Interface
+management 127.0.0.1 7505
+management-client-auth
+
 # Logging
 status /var/log/openvpn/status.log
+status-version 3
 log /var/log/openvpn/openvpn.log
 verb 3
 `
@@ -105,33 +111,25 @@ verb 3
     writeFileSync(CONFIG_PATH, newConfig)
     console.log('[update-config] Wrote new config')
 
-    // Reload VPN service
+    // Reload VPN via management interface
     try {
-      execSync('systemctl restart openvpn-server@server.service 2>/dev/null || systemctl restart openvpn@server.service', {
-        stdio: 'pipe'
-      })
-      console.log('[update-config] Restarted VPN service')
+      await driver.sendCommand('signal SIGHUP')
+      console.log('[update-config] Reloaded VPN via management interface')
     } catch (err) {
-      console.error('[update-config] Failed to restart service:', err)
+      console.error('[update-config] Failed to reload via management interface:', err)
       // Restore backup
       writeFileSync(CONFIG_PATH, currentConfig)
-      throw new Error('Failed to restart VPN service. Config restored from backup.')
+      throw new Error('Failed to reload VPN. Config restored from backup.')
     }
 
-    // Wait a moment and check if service is running
+    // Wait a moment for reload to complete
     await new Promise(resolve => setTimeout(resolve, 2000))
 
-    try {
-      execSync('systemctl is-active openvpn-server@server.service 2>/dev/null || systemctl is-active openvpn@server.service', {
-        stdio: 'pipe'
-      })
-    } catch (err) {
-      // Service not running, restore backup
+    // Verify VPN is still connected
+    if (!driver.isConnected()) {
+      // Restore backup
       writeFileSync(CONFIG_PATH, currentConfig)
-      execSync('systemctl restart openvpn-server@server.service 2>/dev/null || systemctl restart openvpn@server.service', {
-        stdio: 'pipe'
-      })
-      throw new Error('VPN service failed to start with new config. Restored previous config.')
+      throw new Error('VPN disconnected after config update. Restored previous config.')
     }
 
     return {

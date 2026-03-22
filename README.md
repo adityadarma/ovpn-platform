@@ -9,6 +9,7 @@ A centralized, open-source VPN management inspired by enterprise solutions (like
 ## Key Features
 
 - **Multi-Database Support:** Run securely on SQLite (default/development), PostgreSQL, or MySQL/MariaDB.
+- **Multi-VPN Support:** OpenVPN (production ready) and WireGuard (experimental) with easy extensibility for other VPN types.
 - **Node Clustering:** Deploy multiple VPN server agents globally. The central manager orchestrates them all.
 - **Role-Based Access Control (RBAC):** Admin and User roles.
 - **Network Policies:** Define which VPN users can access which internal IP segments via CIDR-based Allow/Deny routing rules.
@@ -50,12 +51,30 @@ A centralized, open-source VPN management inspired by enterprise solutions (like
               │  │  Node Agent    │ │
               │  │  (Node.js)     │ │
               │  └────────┬───────┘ │
+              │           │ TCP     │
+              │  ┌────────▼───────┐ │
+              │  │   OpenVPN      │ │
+              │  │   Management   │ │
+              │  │   Interface    │ │
+              │  │   (port 7505)  │ │
+              │  └────────┬───────┘ │
               │           │         │
               │  ┌────────▼───────┐ │
-              │  │   VPN      │ │
+              │  │   OpenVPN      │ │
+              │  │   Server       │ │
               │  └────────────────┘ │
               └─────────────────────┘
 ```
+
+**Key Features:**
+- **Loose Coupling:** Agent communicates via VPN driver abstraction (no systemd dependency)
+- **Security First:** Agent runs without NET_ADMIN privileges
+- **Real-time Monitoring:** Live client data via management interface
+- **Hybrid Deployment:** Supports both host-based and containerized VPN
+- **Multi-VPN Support:** OpenVPN (production), WireGuard (experimental), easy to add more
+- **Extensible:** Driver pattern for easy addition of new VPN providers (IPSec, SoftEther, etc)
+
+For detailed architecture documentation, see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Monorepo Structure
 
@@ -75,51 +94,42 @@ vpn-manager/
 
 ---
 
-## 🚀 Quick Start (Development)
+## 🚀 Quick Start
 
-### Prerequisites
-- **Node.js**: >= 24.x
-- **Package Manager**: pnpm >= 9.x
-- (Optional) Docker for running Postgres/MySQL locally.
+**⚠️ IMPORTANT: Install Manager first, then VPN Node!**
 
-### 1. Installation
+**📖 Complete Guide:** [GETTING-STARTED.md](GETTING-STARTED.md)
 
-Clone the repository and install all monorepo dependencies:
+### Step 1: Install Manager (First)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
+```
+
+Access: http://YOUR_SERVER_IP:3000 (admin / Admin@1234!)
+
+### Step 2: Install VPN Node (Second)
+
+```bash
+MANAGER_URL=http://YOUR_MANAGER_IP:3001 \
+VPN_TOKEN=your-vpn-token \
+REG_KEY=your-registration-key \
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+```
+
+### Development (Local)
+
 ```bash
 git clone https://github.com/adityadarma/vpn-manager.git
 cd vpn-manager
 pnpm install
-```
-
-### 2. Configuration
-
-Copy the example environment variables:
-```bash
 cp .env.example .env
-```
-By default, the system will use **SQLite** (a local file stored in `data/vpn.sqlite`) making it incredibly easy to start.
-
-### 3. Database Setup
-
-Run the migrations to create tables, and seed the database with the default admin account:
-```bash
-pnpm db:migrate
-pnpm db:seed
-```
-
-### 4. Running the Manager
-
-Start both the API server and Web Dashboard in development mode:
-```bash
+pnpm db:migrate && pnpm db:seed
+pnpm build
 pnpm dev
 ```
 
-**Access Points:**
-- **Web UI:** http://localhost:3000
-- **REST API:** http://localhost:3001
-- **Default Credentials:**
-  - Username: `admin`
-  - Password: `Admin@1234!` *(Force-update recommended immediately after login).*
+Access: http://localhost:3000 (admin / Admin@1234!)
 
 ---
 
@@ -157,133 +167,88 @@ Policies define Access Control Lists (ACL).
 
 ## 💻 VPN Server Installation (Node Agent)
 
-The "Agent" acts as the middleman between your central Manager API and the local VPN daemon holding the client connections. We provide automated installation scripts for different deployment scenarios.
+### Quick Install (Recommended) ⭐
 
-### Option 1: Standalone Agent (Docker) - Recommended ⭐
-
-This is the easiest way to deploy an agent on a VPN node. It will:
-- Install Docker (if not present)
-- Install VPN server (if not present)
-- Auto-register node (optional) or use manual registration
-- Configure and start the agent in a Docker container
-- Set up systemd service for auto-start
+Install OpenVPN + Agent in one command:
 
 ```bash
-# One-line install
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-agent.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
 ```
 
-**Registration Options:**
+This will:
+- Install Docker (if needed)
+- Install and configure OpenVPN with management interface
+- Install and start the Agent
+- Configure VPN hooks automatically
 
-During installation, choose one of these methods:
+**Time**: ~5 minutes
 
-1. **Auto-register with Registration Key** (Recommended)
-   - Set `NODE_REGISTRATION_KEY` in Manager's `.env` (generate with `openssl rand -hex 32`)
-   - Provide the key during installation
-   - Most secure method for production
+### Registration Options
 
-2. **Auto-register with Admin JWT Token**
-   - Login to Manager Web UI as admin
-   - Copy JWT token from browser (DevTools → Local Storage)
-   - Provide token during installation
-   - Token expires based on `JWT_EXPIRES_IN` setting
+**Option 1: Auto-register (Recommended)**
 
-3. **Manual Registration**
-   - Register node in Manager Web UI first (Nodes → Add Node)
-   - Copy Node ID and Secret Token
-   - Provide credentials during installation
-
-**Management Commands:**
+Set registration key on Manager:
 ```bash
-# Start agent
-systemctl start vpn-agent
-# or
-/opt/vpn-agent/start.sh
-
-# Stop agent
-systemctl stop vpn-agent
-# or
-/opt/vpn-agent/stop.sh
-
-# View logs
-/opt/vpn-agent/logs.sh
-
-# Check status
-/opt/vpn-agent/status.sh
+# On Manager server
+echo "NODE_REGISTRATION_KEY=$(openssl rand -hex 32)" >> .env
+docker compose restart api
 ```
 
-### Option 2: Manual Docker Deployment
+Then install with key:
+```bash
+MANAGER_URL=https://manager.example.com \
+VPN_TOKEN=your-vpn-token \
+REG_KEY=your-registration-key \
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+```
 
-If you prefer manual control:
+**Option 2: Manual register**
+
+1. Register node in Web UI first (Nodes → Add Node)
+2. Copy Node ID and Secret Token
+3. Install with credentials:
 
 ```bash
-mkdir -p /opt/vpn-agent
-cd /opt/vpn-agent
-
-# 1. Install VPN server
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/vpn-server.sh -o vpn-server.sh
-chmod +x vpn-server.sh
-sudo ./vpn-server.sh install
-
-# 2. Download agent compose file
-wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/docker-compose.agent.yml -O docker-compose.yml
-wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/.env.agent -O .env
-
-# 3. Configure .env with your credentials
-nano .env
-
-# 4. Start agent
-docker compose up -d
+MANAGER_URL=https://manager.example.com \
+VPN_TOKEN=your-vpn-token \
+NODE_ID=your-node-id \
+SECRET_TOKEN=your-secret-token \
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
 ```
 
-### Option 3: Native Installation (With Repository)
+### Management Commands
 
-For development or custom deployments:
-
-1. SSH into your VPN Server as root
-2. Clone and build:
-   ```bash
-   git clone https://github.com/adityadarma/vpn-manager.git
-   cd vpn-manager
-   
-   # Install VPN
-   chmod +x scripts/vpn-server.sh
-   sudo ./scripts/vpn-server.sh install
-   
-   # Build agent
-   pnpm install
-   pnpm --filter @vpn/agent build
-   ```
-
-3. Configure environment:
-   ```bash
-   export AGENT_MANAGER_URL=https://manager.yourdomain.com
-   export AGENT_NODE_ID=<uuid-from-web-ui>
-   export AGENT_SECRET_TOKEN=<secret-from-web-ui>
-   ```
-
-4. Run agent:
-   ```bash
-   node apps/agent/dist/index.js
-   ```
-
-*(For production, use `systemd` or `PM2` to ensure auto-restart)*
-
-### Uninstall
-
-**Standalone Agent:**
 ```bash
-systemctl stop vpn-agent
-systemctl disable vpn-agent
-rm -rf /opt/vpn-agent
-rm -f /etc/systemd/system/vpn-agent.service
-systemctl daemon-reload
+# Check agent
+docker logs vpn-agent
+
+# Check OpenVPN
+systemctl status openvpn-server@server
+
+# View VPN logs
+tail -f /var/log/openvpn/openvpn.log
+
+# Update agent
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/update-node.sh | sudo bash
+
+# Uninstall everything
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/uninstall-node.sh | sudo bash
 ```
 
-**VPN Server:**
+### Manual Installation
+
+For advanced users who want more control:
+
 ```bash
-sudo ./vpn-server.sh uninstall
+# 1. Download script
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh -o install-node.sh
+chmod +x install-node.sh
+
+# 2. Run interactively
+sudo ./install-node.sh
 ```
+
+The script will prompt for configuration.
 
 ---
 
@@ -341,9 +306,12 @@ From the root directory, you can utilize Turborepo and pnpm to manage the worksp
 
 ## 📚 Documentation
 
-- **[README.md](README.md)** - Project overview and quick start
-- **[DOCKER.md](docs/DOCKER.md)** - Docker deployment guide (dev & production)
-- **[PRODUCTION-INSTALL.md](docs/PRODUCTION-INSTALL.md)** - Production installation guide
+- **[Installation Guide](docs/INSTALLATION.md)** - Install VPN node
+- **[Architecture](docs/ARCHITECTURE.md)** - System design
+- **[Multi-VPN Support](docs/MULTI-VPN-SUPPORT.md)** - OpenVPN, WireGuard, and more
+- **[Security Hardening](docs/SECURITY-HARDENING.md)** - Security guide
+- **[API Reference](docs/API-ENDPOINTS.md)** - API documentation
+- **[Scripts](scripts/README.md)** - Available scripts
 
 ---
 

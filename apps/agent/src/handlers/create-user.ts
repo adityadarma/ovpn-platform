@@ -1,11 +1,13 @@
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync } from 'node:fs'
+import type { VpnDriver } from '../drivers'
 
 const execAsync = promisify(exec)
 
 export async function handleCreateUser(
   payload: Record<string, unknown>,
+  _driver: VpnDriver,
 ): Promise<Record<string, unknown>> {
   const username = payload['username'] as string
   if (!username) throw new Error('Missing username in payload')

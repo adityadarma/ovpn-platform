@@ -5,18 +5,23 @@
 # 
 # Prerequisites:
 #   1. VPN server must be installed and running on the host
-#   2. Node must be registered in Manager Web UI
-#   3. .env file must be configured with credentials
+#   2. VPN server must have management interface enabled (port 7505)
+#   3. Node must be registered in Manager Web UI
+#   4. .env file must be configured with credentials
 #
 # Usage:
 #   docker compose up -d
 #
 # Network Mode:
 #   Uses 'host' network mode because:
-#   - Agent needs to access VPN running on host (not in container)
+#   - Agent needs to connect to VPN management interface on host (127.0.0.1:7505)
 #   - Agent needs to connect to Manager API on external server
-#   - Agent needs to manage host iptables/firewall rules
 #   - No network isolation needed for standalone agent
+#
+# Security:
+#   - Agent does NOT require NET_ADMIN capability
+#   - Agent does NOT require /dev/net/tun access
+#   - Agent communicates via OpenVPN Management Interface only
 #
 # ============================================================
 
@@ -33,15 +38,20 @@ services:
       VPN_TOKEN: ${VPN_TOKEN:?VPN_TOKEN is required}
       AGENT_POLL_INTERVAL_MS: ${AGENT_POLL_INTERVAL_MS:-5000}
       AGENT_HEARTBEAT_INTERVAL_MS: ${AGENT_HEARTBEAT_INTERVAL_MS:-30000}
-    # Use host network for direct access to host VPN and external Manager API
+      
+      # VPN Management Interface Settings
+      VPN_MANAGEMENT_HOST: ${VPN_MANAGEMENT_HOST:-127.0.0.1}
+      VPN_MANAGEMENT_PORT: ${VPN_MANAGEMENT_PORT:-7505}
+      VPN_MANAGEMENT_PASSWORD: ${VPN_MANAGEMENT_PASSWORD:-}
+    
+    # Use host network for direct access to host VPN management interface
     network_mode: host
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun
+    
+    # Read-only access to VPN certificates
     volumes:
       - /etc/openvpn/server:/etc/openvpn/server:ro
       - /etc/openvpn/easy-rsa:/etc/openvpn/easy-rsa
+    
     logging:
       driver: "json-file"
       options:

@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { VpnDriver } from '../drivers'
 
 const EASY_RSA_PKI = '/etc/openvpn/easy-rsa/pki'
 const OPENVPN_CA = `${EASY_RSA_PKI}/ca.crt`
 
 export async function handleGenerateConfig(
   payload: Record<string, unknown>,
+  _driver: VpnDriver,
 ): Promise<Record<string, unknown>> {
   const username = payload['username'] as string
   const serverIp = payload['serverIp'] as string

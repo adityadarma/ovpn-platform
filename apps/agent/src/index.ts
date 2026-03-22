@@ -9,6 +9,27 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') })
 import { loadAgentEnv } from './config/env'
 import { startPoller } from './core/poller'
 import { startHeartbeat } from './core/heartbeat'
+import { OpenVpnManagementDriver, WireGuardDriver, type VpnDriver } from './drivers'
+
+/**
+ * Create VPN driver based on configuration
+ */
+function createVpnDriver(env: ReturnType<typeof loadAgentEnv>): VpnDriver {
+  switch (env.VPN_TYPE) {
+    case 'openvpn':
+      return new OpenVpnManagementDriver(
+        env.VPN_MANAGEMENT_HOST,
+        env.VPN_MANAGEMENT_PORT,
+        env.VPN_MANAGEMENT_PASSWORD,
+      )
+    
+    case 'wireguard':
+      return new WireGuardDriver(env.WIREGUARD_INTERFACE)
+    
+    default:
+      throw new Error(`Unsupported VPN type: ${env.VPN_TYPE}`)
+  }
+}
 
 async function main() {
   const env = loadAgentEnv()
@@ -16,21 +37,41 @@ async function main() {
   console.log(`🚀 VPN Agent starting...`)
   console.log(`   Manager:  ${env.AGENT_MANAGER_URL}`)
   console.log(`   Node ID:  ${env.AGENT_NODE_ID}`)
+  console.log(`   VPN Type: ${env.VPN_TYPE}`)
   console.log(`   Poll:     every ${env.AGENT_POLL_INTERVAL_MS}ms`)
   console.log(`   Heartbeat: every ${env.AGENT_HEARTBEAT_INTERVAL_MS}ms`)
+  
+  if (env.VPN_TYPE === 'openvpn') {
+    console.log(`   VPN Mgmt: ${env.VPN_MANAGEMENT_HOST}:${env.VPN_MANAGEMENT_PORT}`)
+  } else if (env.VPN_TYPE === 'wireguard') {
+    console.log(`   WG Interface: ${env.WIREGUARD_INTERFACE}`)
+  }
 
-  startHeartbeat(env)
-  startPoller(env)
+  // Initialize VPN driver (factory pattern)
+  const driver = createVpnDriver(env)
 
-  process.on('SIGINT', () => {
+  // Connect to VPN management interface
+  try {
+    await driver.connect()
+    console.log(`✓ Connected to ${env.VPN_TYPE.toUpperCase()} management interface`)
+  } catch (err) {
+    console.error(`✗ Failed to connect to ${env.VPN_TYPE.toUpperCase()} management interface:`, (err as Error).message)
+    console.warn(`  Agent will continue but VPN monitoring will be unavailable`)
+  }
+
+  // Start services
+  startHeartbeat(env, driver)
+  startPoller(env, driver)
+
+  // Graceful shutdown
+  const shutdown = async () => {
     console.log('\n🛑 VPN Agent shutting down...')
+    await driver.disconnect()
     process.exit(0)
-  })
+  }
 
-  process.on('SIGTERM', () => {
-    console.log('\n🛑 VPN Agent shutting down...')
-    process.exit(0)
-  })
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
 main().catch((err) => {

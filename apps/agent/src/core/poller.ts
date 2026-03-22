@@ -1,7 +1,8 @@
 import type { AgentEnv } from '../config/env'
+import type { VpnDriver } from '../drivers'
 import { executeTask } from './executor'
 
-export function startPoller(env: AgentEnv): void {
+export function startPoller(env: AgentEnv, driver: VpnDriver): void {
   console.log(`🔄 Task poller started (interval: ${env.AGENT_POLL_INTERVAL_MS}ms)`)
 
   const poll = async () => {
@@ -22,7 +23,7 @@ export function startPoller(env: AgentEnv): void {
 
       for (const task of data.tasks) {
         console.log(`[poller] Executing task: ${task.action} (${task.id})`)
-        await executeTask(env, task)
+        await executeTask(env, task, driver)
       }
     } catch (err) {
       console.error('[poller] Error:', (err as Error).message)

@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
+import type { VpnDriver } from '../drivers'
 
-export async function handleSyncCertificates(): Promise<Record<string, unknown>> {
+export async function handleSyncCertificates(_payload: Record<string, unknown>, _driver: VpnDriver): Promise<Record<string, unknown>> {
   const CA_CERT_PATH = '/etc/openvpn/server/ca.crt'
   const TLS_CRYPT_PATH = '/etc/openvpn/server/tls-crypt.key'
   const TLS_AUTH_PATH = '/etc/openvpn/server/ta.key'

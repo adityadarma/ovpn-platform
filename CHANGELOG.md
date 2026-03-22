@@ -5,7 +5,105 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-03-22
+
+### 🎉 Major Architecture Refactor
+
+This release introduces a completely new architecture based on OpenVPN Management Interface, eliminating systemd dependencies and improving security, reliability, and extensibility.
+
+### Added
+- **VPN Driver Layer**: New abstraction for VPN communication
+  - `VpnDriver` interface for extensibility
+  - `OpenVpnManagementDriver` using TCP management interface
+  - Support for future VPN providers (WireGuard, IPSec)
+- **Real-time Monitoring**: Live client data via management interface
+- **Enhanced Heartbeat**: Agent sends real-time VPN data
+- **Simplified Installation**
+  - `install.sh` - All-in-one installer (200 lines)
+  - `update.sh` - Quick update (30 lines)
+  - `uninstall.sh` - Clean removal (60 lines)
+  - One command installation
+  - Auto-registration support
+- **Minimal Documentation**
+  - `docs/ARCHITECTURE.md` - System design
+  - `docs/INSTALLATION.md` - Installation guide
+
+### Changed
+- **Agent Communication**: Switched from systemctl to management interface
+  - `handleReloadOpenvpn`: Now uses `signal SIGHUP` via management interface
+  - `handleRevokeUser`: Uses `disconnectClient()` instead of systemctl
+  - `handleUpdateServerConfig`: Uses management interface for reload
+- **Security Improvements**
+  - Removed `NET_ADMIN` capability requirement from agent
+  - Removed `/dev/net/tun` device requirement from agent
+  - Agent now runs with minimal privileges
+- **Docker Compose**: Updated `docker-compose.agent.yml`
+  - Removed `cap_add: NET_ADMIN`
+  - Removed `devices: /dev/net/tun`
+  - Added management interface environment variables
+- **Handler Signatures**: All handlers now receive `VpnDriver` parameter
+  - Enables driver-based operations
+  - Better testability and modularity
+
+### Removed
+- **Deprecated Scripts** (replaced by `install.sh`)
+  - `install-agent.sh` (1032 lines)
+  - `vpn-server.sh` (500+ lines)
+  - `install-hooks.sh` (200+ lines)
+  - `enable-management-interface.sh` (200+ lines)
+- **Excessive Documentation** (kept only essentials)
+  - Removed detailed comparison docs
+  - Removed migration guides (fresh install recommended)
+  - Removed developer-specific guides
+  - Kept: Architecture, Installation, API Reference
+
+### Breaking Changes
+- **OpenVPN Configuration Required**: Must enable management interface
+  ```conf
+  management 127.0.0.1 7505
+  management-client-auth
+  status /var/log/openvpn/status.log
+  status-version 3
+  ```
+- **Environment Variables**: New required variables for agent
+  - `VPN_MANAGEMENT_HOST` (default: 127.0.0.1)
+  - `VPN_MANAGEMENT_PORT` (default: 7505)
+  - `VPN_MANAGEMENT_PASSWORD` (optional)
+- **API Schema**: Heartbeat endpoint now accepts additional fields
+  - `clients` - Array of connected clients
+  - `metrics` - VPN metrics object
+  - `serverInfo` - Server information object
+
+### Migration
+See [docs/MIGRATION-V2.md](docs/MIGRATION-V2.md) for detailed migration instructions.
+
+### Benefits
+- ✅ **Better Security**: No special privileges required
+- ✅ **Real-time Data**: Live monitoring without polling delays
+- ✅ **Better Reliability**: Direct communication, no log parsing
+- ✅ **Portable**: No systemd or OS-specific dependencies
+- ✅ **Extensible**: Easy to add new VPN providers
+- ✅ **Easier Debugging**: Clear error messages and better logging
+
+---
+
 ## [Unreleased]
+
+### Fixed
+- **Agent Hook Installation**: Improved container readiness check during hook installation
+  - Wait up to 60 seconds for container to be fully ready (increased from 30s)
+  - Verify container can serve files before attempting hook installation
+  - Better error messages with troubleshooting steps
+  - Manual hook installation script (`install-hooks.sh`) with same improved wait logic
+  - Prevents "Agent container not ready, skipping hook installation" warning
+
+### Changed
+- Enhanced `install-agent.sh` hook installation logic
+  - Test file access instead of just checking "running" status
+  - Show progress indicators during wait
+  - Clearer instructions for manual installation if automatic fails
+- Enhanced `install-hooks.sh` with better container readiness detection
+- Updated `docs/AGENT-INSTALLATION.md` with hook installation troubleshooting guide
 
 ### Added
 - **VPN Hooks Authentication**: Added `VPN_TOKEN` environment variable for secure VPN hook authentication

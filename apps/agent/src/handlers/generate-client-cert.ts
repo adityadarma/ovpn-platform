@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
+import type { VpnDriver } from '../drivers'
 
 interface GenerateClientCertParams {
   username: string
@@ -14,7 +15,7 @@ interface GenerateClientCertResult {
   expiresAt: string
 }
 
-export async function handleGenerateClientCert(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function handleGenerateClientCert(params: Record<string, unknown>, _driver: VpnDriver): Promise<Record<string, unknown>> {
   const username = params.username as string | undefined
   const password = params.password as string | undefined
   const validDays = params.validDays as number | null | undefined

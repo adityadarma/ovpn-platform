@@ -1,5 +1,6 @@
 import type { AgentEnv } from '../config/env'
 import type { TaskAction } from '@vpn/shared'
+import type { VpnDriver } from '../drivers'
 import { handleCreateUser } from '../handlers/create-user'
 import { handleRevokeUser } from '../handlers/revoke-user'
 import { handleReloadOpenvpn } from '../handlers/reload-openvpn'
@@ -16,7 +17,7 @@ interface Task {
   payload: Record<string, unknown>
 }
 
-type HandlerFn = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>
+type HandlerFn = (payload: Record<string, unknown>, driver: VpnDriver) => Promise<Record<string, unknown>>
 
 const HANDLERS: Partial<Record<TaskAction, HandlerFn>> = {
   create_vpn_user: handleCreateUser,
@@ -30,7 +31,7 @@ const HANDLERS: Partial<Record<TaskAction, HandlerFn>> = {
   sync_certificates: handleSyncCertificates,
 }
 
-export async function executeTask(env: AgentEnv, task: Task): Promise<void> {
+export async function executeTask(env: AgentEnv, task: Task, driver: VpnDriver): Promise<void> {
   const handler = HANDLERS[task.action as TaskAction]
 
   let status: 'success' | 'failed' = 'failed'
@@ -42,7 +43,7 @@ export async function executeTask(env: AgentEnv, task: Task): Promise<void> {
     errorMessage = `Unknown action: ${task.action}`
   } else {
     try {
-      result = await handler(task.payload)
+      result = await handler(task.payload, driver)
       status = 'success'
     } catch (err) {
       console.error(`[executor] Task ${task.id} failed:`, (err as Error).message)

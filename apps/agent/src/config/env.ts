@@ -8,6 +8,17 @@ const AgentEnvSchema = z.object({
   AGENT_POLL_INTERVAL_MS: z.coerce.number().int().default(5_000),
   AGENT_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().default(30_000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  
+  // VPN Type Selection
+  VPN_TYPE: z.enum(['openvpn', 'wireguard']).default('openvpn'),
+  
+  // OpenVPN Management Interface Settings
+  VPN_MANAGEMENT_HOST: z.string().default('127.0.0.1'),
+  VPN_MANAGEMENT_PORT: z.coerce.number().int().default(7505),
+  VPN_MANAGEMENT_PASSWORD: z.string().optional(),
+  
+  // WireGuard Settings
+  WIREGUARD_INTERFACE: z.string().default('wg0'),
 })
 
 export type AgentEnv = z.infer<typeof AgentEnvSchema>

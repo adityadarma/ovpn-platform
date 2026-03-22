@@ -1,14 +1,11 @@
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
-
-const execAsync = promisify(exec)
+import type { VpnDriver } from '../drivers'
 
 export async function handleReloadOpenvpn(
   _payload: Record<string, unknown>,
+  driver: VpnDriver,
 ): Promise<Record<string, unknown>> {
-  const { stdout } = await execAsync(
-    'systemctl reload openvpn || systemctl reload openvpn@server',
-  )
-  console.log('[reload-openvpn] OpenVPN reloaded')
-  return { stdout: stdout.trim() }
+  // Send signal command via management interface
+  await driver.sendCommand('signal SIGHUP')
+  console.log('[reload-openvpn] OpenVPN reloaded via management interface')
+  return { success: true, message: 'OpenVPN reloaded successfully' }
 }
