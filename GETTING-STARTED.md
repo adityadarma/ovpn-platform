@@ -2,40 +2,83 @@
 
 Complete installation guide for VPN Manager in production and development environments.
 
-## 📋 Installation Order
+## 🎯 Choose Your Installation Mode
 
-**IMPORTANT:** Follow this order:
+VPN Manager supports two installation modes:
 
-1. **First:** Install VPN Manager (API + Web UI) on one server
-2. **Second:** Install VPN Node (OpenVPN/WireGuard + Agent) on another server
-
-The VPN Node needs to connect to the Manager, so the Manager must be installed first!
+1. **All-in-One:** Manager + VPN Node on same server (simplest)
+2. **Separate Servers:** Manager and VPN Node on different servers (production)
 
 ---
 
 ## 📋 Table of Contents
 
-- [Step 1: Install VPN Manager](#-step-1-install-vpn-manager)
-- [Step 2: Configure Manager](#-step-2-configure-manager)
-- [Step 3: Install VPN Node](#-step-3-install-vpn-node)
-- [Development Installation](#development-installation)
-- [Initial Configuration](#initial-configuration)
-- [Troubleshooting](#troubleshooting)
+- [All-in-One Installation](#-all-in-one-installation-single-server)
+- [Separate Servers Installation](#-separate-servers-installation)
+- [Development Installation](#-development-installation)
+- [Initial Configuration](#-initial-configuration)
+- [Troubleshooting](#-troubleshooting)
 
 ---
 
-## 🚀 Step 1: Install VPN Manager
+## 🚀 All-in-One Installation (Single Server)
 
-VPN Manager consists of API and Web UI. Install this first on a server.
+Install everything (Manager + VPN Node) on one server.
 
 ### Prerequisites
 
 - Linux server (Ubuntu 20.04+, Debian 11+, CentOS 8+)
 - Docker & Docker Compose v2
 - Root/sudo access
+- Open ports: 3000 (Web UI), 3001 (API), 1194 (OpenVPN UDP)
+
+### Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
+```
+
+During installation:
+1. Select **Installation mode:** `2) All-in-One`
+2. Choose database type (SQLite recommended for single server)
+3. Enter server domain/IP
+4. Configure ports
+5. Choose HTTP/HTTPS
+
+The script will:
+- Install Manager (API + Web UI)
+- Install OpenVPN on host
+- Install Agent in Docker
+- Auto-register VPN Node
+- Configure VPN hooks
+
+### Access
+
+```
+Web UI: http://YOUR_SERVER_IP:3000
+Login: admin / Admin@1234!
+```
+
+**Done!** Your VPN server is ready. Skip to [Initial Configuration](#-initial-configuration)
+
+---
+
+## 🏢 Separate Servers Installation
+
+Install Manager and VPN Node on different servers (recommended for production).
+
+### Step 1: Install VPN Manager
+
+VPN Manager consists of API and Web UI. Install this first on a server.
+
+#### Prerequisites
+
+- Linux server (Ubuntu 20.04+, Debian 11+, CentOS 8+)
+- Docker & Docker Compose v2
+- Root/sudo access
 - Open ports: 3000 (Web UI), 3001 (API)
 
-### Install Manager (API + Web UI)
+#### Install Manager
 
 **One-line install:**
 
@@ -43,42 +86,14 @@ VPN Manager consists of API and Web UI. Install this first on a server.
 curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
 ```
 
-**Manual install:**
+During installation:
+1. Select **Installation mode:** `1) Manager Only`
+2. Choose database type
+3. Enter server domain/IP
+4. Configure ports
+5. Choose HTTP/HTTPS
 
-```bash
-# 1. Create directory
-mkdir -p /opt/vpn-manager
-cd /opt/vpn-manager
-
-# 2. Download docker-compose
-wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/docker-compose.yml
-
-# 3. Download environment template
-wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/.env.production -O .env
-
-# 4. Generate JWT secret
-JWT_SECRET=$(openssl rand -base64 32)
-sed -i "s|JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" .env
-
-# 5. Generate VPN token
-VPN_TOKEN=$(openssl rand -hex 32)
-sed -i "s|VPN_TOKEN=.*|VPN_TOKEN=$VPN_TOKEN|" .env
-
-# 6. Generate registration key (optional, for auto-register nodes)
-REG_KEY=$(openssl rand -hex 32)
-sed -i "s|NODE_REGISTRATION_KEY=.*|NODE_REGISTRATION_KEY=$REG_KEY|" .env
-
-# 7. Set API URL (replace with your server IP/domain)
-sed -i "s|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://YOUR_SERVER_IP:3001|" .env
-
-# 8. Start services
-docker compose up -d
-
-# 9. Check logs
-docker compose logs -f
-```
-
-### Access Web UI
+#### Access Web UI
 
 ```
 http://YOUR_SERVER_IP:3000
@@ -92,11 +107,21 @@ http://YOUR_SERVER_IP:3000
 
 ---
 
-## ⚙️ Step 2: Configure Manager
+### Step 2: Configure Manager
 
-Before installing VPN Node, configure the Manager:
+Before installing VPN Node, get credentials from Manager:
 
-### Option A: Auto-Register (Recommended)
+```bash
+cd /opt/vpn-manager
+grep NODE_REGISTRATION_KEY .env
+grep VPN_TOKEN .env
+```
+
+Save these values for VPN Node installation.
+
+---
+
+### Step 3: Install VPN Node
 
 Set up auto-registration for easy node installation:
 
@@ -148,22 +173,30 @@ Now install VPN Node on a separate server. This server will run OpenVPN or WireG
 **Using Auto-Register (if you set up registration key in Step 2):**
 
 ```bash
-# On VPN Node server
-MANAGER_URL=http://YOUR_MANAGER_SERVER_IP:3001 \
+# On VPN Node server - Download script first
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh -o install-node.sh
+chmod +x install-node.sh
+
+# Run with environment variables
+sudo MANAGER_URL=http://YOUR_MANAGER_SERVER_IP:3001 \
 VPN_TOKEN=your-vpn-token-from-step2 \
 REG_KEY=your-registration-key-from-step2 \
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+./install-node.sh
 ```
 
 **Using Manual Register (if you registered node in Web UI):**
 
 ```bash
-# On VPN Node server
-MANAGER_URL=http://YOUR_MANAGER_SERVER_IP:3001 \
+# On VPN Node server - Download script first
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh -o install-node.sh
+chmod +x install-node.sh
+
+# Run with environment variables
+sudo MANAGER_URL=http://YOUR_MANAGER_SERVER_IP:3001 \
 VPN_TOKEN=your-vpn-token-from-step2 \
 NODE_ID=your-node-id-from-webui \
 SECRET_TOKEN=your-secret-token-from-webui \
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+./install-node.sh
 ```
 
 ### Verify Installation
@@ -236,15 +269,7 @@ pnpm dev
 
 ---
 
-## 💻 Development Installation
-
-### Prerequisites
-
-- Node.js >= 24.x
-- pnpm >= 9.x
-- Git
-
-### Step 1: Clone Repository
+## 🎯 Initial Configuration
 
 ```bash
 git clone https://github.com/adityadarma/vpn-manager.git

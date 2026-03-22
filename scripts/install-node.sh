@@ -5,7 +5,14 @@
 # Installs OpenVPN + Agent in one go
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install.sh | sudo bash
+#   Method 1 (Recommended - Download first):
+#     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh -o install-node.sh
+#     chmod +x install-node.sh
+#     sudo AGENT_MANAGER_URL=https://api.example.com VPN_TOKEN=xxx REG_KEY=yyy ./install-node.sh
+#
+#   Method 2 (Direct pipe - requires sudo -E):
+#     AGENT_MANAGER_URL=https://api.example.com VPN_TOKEN=xxx REG_KEY=yyy \
+#       curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo -E bash
 #
 # Environment Variables (for automation):
 #   AGENT_MANAGER_URL or MANAGER_URL - Manager API URL (required)
@@ -168,11 +175,21 @@ cd "$INSTALL_DIR"
 
 info "Downloading agent files..."
 curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/docker-compose.agent.yml -o docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/.env.agent -o .env
 ok "Files downloaded"
 
 # Support both AGENT_MANAGER_URL and MANAGER_URL
 MANAGER_URL=${AGENT_MANAGER_URL:-$MANAGER_URL}
+
+# Debug: Show what we received
+if [ -n "$MANAGER_URL" ]; then
+    info "Detected MANAGER_URL: $MANAGER_URL"
+fi
+if [ -n "$VPN_TOKEN" ]; then
+    info "Detected VPN_TOKEN: ${VPN_TOKEN:0:10}..."
+fi
+if [ -n "$REG_KEY" ]; then
+    info "Detected REG_KEY: ${REG_KEY:0:10}..."
+fi
 
 # Configure environment
 if [ -n "$MANAGER_URL" ] && [ -n "$VPN_TOKEN" ]; then
@@ -197,6 +214,7 @@ if [ -n "$MANAGER_URL" ] && [ -n "$VPN_TOKEN" ]; then
             ok "Node registered: $NODE_ID"
         else
             err "Registration failed (HTTP $HTTP_CODE)"
+            echo "$BODY"
             exit 1
         fi
     fi
@@ -204,7 +222,7 @@ if [ -n "$MANAGER_URL" ] && [ -n "$VPN_TOKEN" ]; then
     [ -z "$NODE_ID" ] && { err "NODE_ID required"; exit 1; }
     [ -z "$SECRET_TOKEN" ] && { err "SECRET_TOKEN required"; exit 1; }
     
-    # Update .env with proper escaping
+    # Create .env with proper values
     cat > .env <<EOF
 # ============================================================
 # VPN Manager — Agent Configuration (Standalone Deployment)
