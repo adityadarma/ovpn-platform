@@ -71,7 +71,6 @@ echo "Cleaning up files..."
 rm -rf /etc/openvpn
 rm -rf /var/log/openvpn*
 rm -rf /opt/vpn-agent
-rm -f /usr/local/bin/vpn-login
 rm -f /usr/local/bin/vpn-connect
 rm -f /usr/local/bin/vpn-disconnect
 

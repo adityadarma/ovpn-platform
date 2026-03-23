@@ -341,52 +341,6 @@ POST /nodes/sync-certs
 
 ## VPN Hooks
 
-### Authenticate User
-
-```http
-POST /vpn/auth
-```
-
-**Authentication:** `X-VPN-Token` header
-
-**Request Body:**
-```json
-{
-  "username": "john",
-  "password": "secret",
-  "node_id": "uuid",
-  "real_ip": "192.168.1.100",
-  "client_version": "OpenVPN 2.5.8",
-  "device_name": "laptop-001"
-}
-```
-
-**Response (Success):**
-```json
-{
-  "ok": true,
-  "user_id": "uuid",
-  "username": "john",
-  "role": "user",
-  "static_vpn_ip": "10.8.0.100"
-}
-```
-
-**Response (Failure):**
-```json
-{
-  "error": "Invalid credentials"
-}
-```
-
-**Status Codes:**
-- `200` - Authentication successful
-- `401` - Invalid credentials
-- `403` - Account disabled or expired
-- `503` - VPN_TOKEN not configured
-
----
-
 ### Record Connection
 
 ```http
@@ -394,6 +348,8 @@ POST /vpn/connect
 ```
 
 **Authentication:** `X-VPN-Token` header
+
+**Description:** Records VPN client connection and validates user status. Called by `vpn-connect.sh` hook when client connects.
 
 **Request Body:**
 ```json
@@ -415,6 +371,12 @@ POST /vpn/connect
   "static_ip": "10.8.0.100"
 }
 ```
+
+**Status Codes:**
+- `201` - Session created successfully
+- `403` - Account disabled or expired
+- `404` - User or node not found
+- `503` - VPN_TOKEN not configured
 
 ---
 

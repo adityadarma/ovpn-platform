@@ -3,13 +3,12 @@ import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
 
 /**
- * VPN Auth API — called by vpn-client agent living on the VPN server.
+ * VPN Hooks API — called by vpn-client agent living on the VPN server.
  * All endpoints are protected by X-VPN-Token header (vpn_token from env).
  *
- * Flow:
- *   1. vpn-login  → POST /vpn/auth       (username-as-common-name, auth-user-pass-verify)
- *   2. vpn-connect→ POST /vpn/connect     (client-connect script)
- *   3. vpn-disconnect → POST /vpn/disconnect (client-disconnect script)
+ * Flow (Certificate-only authentication):
+ *   1. vpn-connect→ POST /vpn/connect     (client-connect script, validates user)
+ *   2. vpn-disconnect → POST /vpn/disconnect (client-disconnect script)
  */
 
 const vpnRoutes: FastifyPluginAsync = async (app) => {
@@ -27,55 +26,43 @@ const vpnRoutes: FastifyPluginAsync = async (app) => {
   })
 
   /**
-   * POST /api/v1/vpn/auth
-   * Called by: vpn-login script (auth-user-pass-verify hook)
-   * Body: { username, password, node_id, real_ip, client_version, device_name }
-   * Returns: 200 OK if credentials valid + user is active, else 401
+   * POST /api/v1/vpn/connect
+   * Called by: vpn-connect script (client-connect hook)
+   * Body: { username, vpn_ip, node_id, common_name, real_ip, client_version, device_name }
+   * Opens a new session row in vpn_sessions.
+   * Also validates user is active and within validity period.
    */
   app.post<{
     Body: { 
       username: string
-      password: string
-      node_id?: string
+      vpn_ip: string
+      node_id: string
+      common_name?: string
       real_ip?: string
       client_version?: string
       device_name?: string
     }
   }>(
-    '/vpn/auth',
-    { schema: { tags: ['vpn'], summary: 'Authenticate VPN user credentials' } },
+    '/vpn/connect',
+    { schema: { tags: ['vpn'], summary: 'Record VPN client connect event' } },
     async (request, reply) => {
-      const { username, password, node_id, real_ip, client_version, device_name } = request.body
+      const { username, vpn_ip, node_id, real_ip, client_version, device_name } = request.body
 
-      if (!username) {
-        return reply.status(400).send({ error: 'username required' })
+      if (!username || !vpn_ip || !node_id) {
+        return reply.status(400).send({ error: 'username, vpn_ip and node_id required' })
       }
 
       const user = await app.db('users').where({ username }).first()
+      if (!user) return reply.status(404).send({ error: 'User not found' })
+
+      const node = await app.db('vpn_nodes').where({ id: node_id }).first()
+      if (!node) return reply.status(404).send({ error: 'Node not found' })
+
       const clientIp = real_ip ?? request.ip
 
-      // Log failed attempt if user not found
-      if (!user) {
-        app.log.warn(`[vpn/auth] Unknown user: ${username} from ${clientIp}`)
-        
-        // Record failed attempt
-        await app.db('connection_attempts').insert({
-          id: crypto.randomUUID(),
-          user_id: null,
-          node_id: node_id ?? null,
-          username,
-          real_ip: clientIp,
-          failure_reason: 'invalid_credentials',
-          error_details: 'User not found',
-          attempted_at: new Date(),
-        }).catch(() => { /* non-fatal */ })
-        
-        return reply.status(401).send({ error: 'Invalid credentials' })
-      }
-
-      // Check if account is active
+      // Validate user is active
       if (!user.is_active) {
-        app.log.warn(`[vpn/auth] Inactive user: ${username} from ${clientIp}`)
+        app.log.warn(`[vpn/connect] Inactive user attempted connection: ${username} from ${clientIp}`)
         
         await app.db('connection_attempts').insert({
           id: crypto.randomUUID(),
@@ -123,95 +110,6 @@ const vpnRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(403).send({ error: 'Account expired' })
       }
 
-      // If user requires password authentication, validate it
-      if (user.require_password !== false) {
-        if (!password) {
-          return reply.status(400).send({ error: 'password required for this user' })
-        }
-        
-        const passwordMatch = await bcrypt.compare(password, user.password)
-        if (!passwordMatch) {
-          app.log.warn(`[vpn/auth] Bad password for user: ${username} from ${clientIp}`)
-          
-          await app.db('connection_attempts').insert({
-            id: crypto.randomUUID(),
-            user_id: user.id,
-            node_id: node_id ?? null,
-            username,
-            real_ip: clientIp,
-            failure_reason: 'invalid_password',
-            error_details: 'Password mismatch',
-            attempted_at: new Date(),
-          }).catch(() => { /* non-fatal */ })
-          
-          return reply.status(401).send({ error: 'Invalid credentials' })
-        }
-      } else {
-        // Certificate-only mode: skip password validation
-        app.log.info(`[vpn/auth] Certificate-only auth for user: ${username}`)
-      }
-
-      // Log successful auth
-      const logId = crypto.randomUUID()
-      await app.db('audit_logs').insert({
-        id: logId,
-        user_id: user.id,
-        username: user.username,
-        action: 'vpn_auth_success',
-        resource_type: 'vpn_auth',
-        resource_id: node_id ?? null,
-        ip_address: clientIp,
-        metadata: JSON.stringify({
-          client_version,
-          device_name,
-        }),
-        created_at: new Date(),
-      }).catch(() => { /* non-fatal */ })
-
-      return reply.status(200).send({
-        ok: true,
-        user_id: user.id,
-        username: user.username,
-        role: user.role,
-        static_vpn_ip: user.static_vpn_ip ?? null,
-      })
-    },
-  )
-
-  /**
-   * POST /api/v1/vpn/connect
-   * Called by: vpn-connect script (client-connect hook)
-   * Body: { username, vpn_ip, node_id, common_name, real_ip, client_version, device_name }
-   * Opens a new session row in vpn_sessions.
-   */
-  app.post<{
-    Body: { 
-      username: string
-      vpn_ip: string
-      node_id: string
-      common_name?: string
-      real_ip?: string
-      client_version?: string
-      device_name?: string
-    }
-  }>(
-    '/vpn/connect',
-    { schema: { tags: ['vpn'], summary: 'Record VPN client connect event' } },
-    async (request, reply) => {
-      const { username, vpn_ip, node_id, real_ip, client_version, device_name } = request.body
-
-      if (!username || !vpn_ip || !node_id) {
-        return reply.status(400).send({ error: 'username, vpn_ip and node_id required' })
-      }
-
-      const user = await app.db('users').where({ username }).first()
-      if (!user) return reply.status(404).send({ error: 'User not found' })
-
-      const node = await app.db('vpn_nodes').where({ id: node_id }).first()
-      if (!node) return reply.status(404).send({ error: 'Node not found' })
-
-      const clientIp = real_ip ?? request.ip
-
       // Close any previously open session for this user (defensive)
       const previousSessions = await app.db('vpn_sessions')
         .where({ user_id: user.id })
@@ -250,7 +148,7 @@ const vpnRoutes: FastifyPluginAsync = async (app) => {
 
       app.log.info(`[vpn/connect] ${username} connected — session ${sessionId}, IP ${vpn_ip}, device: ${device_name ?? 'unknown'}`)
 
-      // Log audit
+      // Log successful connection audit
       await app.db('audit_logs').insert({
         id: crypto.randomUUID(),
         user_id: user.id,

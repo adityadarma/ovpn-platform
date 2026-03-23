@@ -14,7 +14,6 @@ interface CreateUserPayload {
   email: string
   password: string
   role: 'admin' | 'user'
-  requirePassword: boolean
 }
 
 export default function UsersPage() {
@@ -23,7 +22,7 @@ export default function UsersPage() {
   const [showCertModal, setShowCertModal] = useState(false)
   const [selectedUserForCert, setSelectedUserForCert] = useState<User | null>(null)
   const [certForm, setCertForm] = useState({ nodeId: '', passwordProtected: false, password: '', validDays: 0 })
-  const [form, setForm] = useState<CreateUserPayload>({ username: '', email: '', password: '', role: 'user', requirePassword: true })
+  const [form, setForm] = useState<CreateUserPayload>({ username: '', email: '', password: '', role: 'user' })
   const [search, setSearch] = useState('')
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
 
@@ -51,7 +50,7 @@ export default function UsersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })
       setShowForm(false)
-      setForm({ username: '', email: '', password: '', role: 'user', requirePassword: true })
+      setForm({ username: '', email: '', password: '', role: 'user' })
       toast.success('User created successfully')
     },
     onError: (e: Error) => toast.error(e.message),
@@ -503,30 +502,6 @@ export default function UsersPage() {
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
                 </select>
-              </div>
-              <div className="border border-gray-200 rounded-lg p-3">
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    id="requirePassword"
-                    checked={form.requirePassword}
-                    onChange={(e) => setForm({ ...form, requirePassword: e.target.checked })}
-                    className="mt-1 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <div className="flex-1">
-                    <label htmlFor="requirePassword" className="block text-sm font-medium text-gray-700 cursor-pointer">
-                      <div className="flex items-center gap-2">
-                        <Lock className="h-4 w-4 text-gray-400" />
-                        Require password authentication
-                      </div>
-                    </label>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {form.requirePassword 
-                        ? 'User must provide username + password when connecting (in addition to certificate)'
-                        : 'Certificate-only authentication (no username/password required in VPN client)'}
-                    </p>
-                  </div>
-                </div>
               </div>
               <div className="flex gap-3 pt-2">
                 <Button

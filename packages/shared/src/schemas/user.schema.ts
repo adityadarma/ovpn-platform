@@ -9,13 +9,11 @@ export const CreateUserSchema = z.object({
   email: z.string().email().optional(),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   role: z.enum(['admin', 'user']).default('user'),
-  requirePassword: z.boolean().default(true).optional(),
 })
 
 export const UpdateUserSchema = CreateUserSchema.partial().omit({ password: true }).extend({
   password: z.string().min(8).optional(),
   isActive: z.boolean().optional(),
-  requirePassword: z.boolean().optional(),
 })
 
 export const UserIdParamSchema = z.object({

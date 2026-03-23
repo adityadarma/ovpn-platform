@@ -345,7 +345,7 @@ ln -sf "$INSTALL_DIR/.env" /opt/vpn-manager/.env
 # Download bash hooks from GitHub (agent scripts)
 REPO_URL="https://raw.githubusercontent.com/adityadarma/vpn-manager/main/apps/agent/scripts"
 
-for hook in vpn-login vpn-connect vpn-disconnect; do
+for hook in vpn-connect vpn-disconnect; do
     # Backup existing hook if different
     if [ -f "/usr/local/bin/${hook}" ]; then
         TEMP_HOOK=$(mktemp)
@@ -365,14 +365,13 @@ for hook in vpn-login vpn-connect vpn-disconnect; do
     fi
 done
 
-# Update OpenVPN config for hooks
-if ! grep -q "auth-user-pass-verify" /etc/openvpn/server/server.conf; then
+# Update OpenVPN config for hooks (certificate-only authentication)
+if ! grep -q "client-connect" /etc/openvpn/server/server.conf; then
     info "Adding VPN hooks to OpenVPN config..."
     cat >> /etc/openvpn/server/server.conf <<'EOF'
 
-# VPN Manager Authentication
+# VPN Manager Hooks (Certificate-only authentication)
 username-as-common-name
-auth-user-pass-verify /usr/local/bin/vpn-login via-file
 client-connect /usr/local/bin/vpn-connect
 client-disconnect /usr/local/bin/vpn-disconnect
 EOF
@@ -402,7 +401,6 @@ echo "Useful commands:"
 echo "  Check agent: docker logs vpn-agent"
 echo "  Check VPN: systemctl status openvpn-server@server"
 echo "  View logs: tail -f /var/log/openvpn/openvpn.log"
-echo "  Test auth: echo -e 'admin\\nAdmin@1234!' > /tmp/t && /usr/local/bin/vpn-login /tmp/t && rm /tmp/t"
 echo ""
 echo "Next steps:"
 echo "  1. Login to Web UI"

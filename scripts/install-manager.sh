@@ -350,7 +350,7 @@ JWT_EXPIRES_IN=7d
 NODE_REGISTRATION_KEY=$NODE_REGISTRATION_KEY
 
 # ---- VPN Hooks Authentication ----
-# Token for authenticating VPN hooks (vpn-login, vpn-connect, vpn-disconnect)
+# Token for authenticating VPN hooks (vpn-connect, vpn-disconnect)
 VPN_TOKEN=$VPN_TOKEN
 
 # ---- Database ----
@@ -679,33 +679,6 @@ install_vpn_hooks() {
     
     # Create bash-based hooks (no Node.js required on host)
     
-    # vpn-login hook
-    cat > /usr/local/bin/vpn-login <<'EOF'
-#!/bin/bash
-# VPN Login Hook - Authenticates user via API
-
-# Read username and password from stdin
-read -r USERNAME
-read -r PASSWORD
-
-# Load environment
-[ -f "/opt/vpn-manager/.env" ] && source /opt/vpn-manager/.env
-
-# Call API to authenticate
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${AGENT_MANAGER_URL}/api/v1/vpn/auth/login" \
-    -H "Content-Type: application/json" \
-    -H "X-VPN-Token: ${VPN_TOKEN}" \
-    -d "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-
-if [ "$HTTP_CODE" == "200" ]; then
-    exit 0
-else
-    exit 1
-fi
-EOF
-    
     # vpn-connect hook
     cat > /usr/local/bin/vpn-connect <<'EOF'
 #!/bin/bash
@@ -752,16 +725,14 @@ exit 0
 EOF
     
     # Make hooks executable
-    chmod +x /usr/local/bin/vpn-login
     chmod +x /usr/local/bin/vpn-connect
     chmod +x /usr/local/bin/vpn-disconnect
     
-    # Update OpenVPN config for hooks
-    if ! grep -q "auth-user-pass-verify" /etc/openvpn/server/server.conf; then
+    # Update OpenVPN config for hooks (certificate-only authentication)
+    if ! grep -q "client-connect" /etc/openvpn/server/server.conf; then
         cat >> /etc/openvpn/server/server.conf <<'EOF'
 
-# VPN Hooks
-auth-user-pass-verify /usr/local/bin/vpn-login via-file
+# VPN Hooks (Certificate-only authentication)
 client-connect /usr/local/bin/vpn-connect
 client-disconnect /usr/local/bin/vpn-disconnect
 username-as-common-name

@@ -9,7 +9,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     '/users',
     { onRequest: [app.authenticate], schema: { tags: ['users'], summary: 'List all VPN users', security: [{ bearerAuth: [] }] } },
     async () => {
-      return app.db('users').select('id', 'username', 'email', 'role', 'is_active', 'require_password', 'last_login', 'created_at', 'updated_at')
+      return app.db('users').select('id', 'username', 'email', 'role', 'is_active', 'last_login', 'created_at', 'updated_at')
     },
   )
 
@@ -19,7 +19,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     { onRequest: [app.authenticate], schema: { tags: ['users'], summary: 'Get user by ID', security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       const user = await app.db('users')
-        .select('id', 'username', 'email', 'role', 'is_active', 'require_password', 'last_login', 'created_at', 'updated_at')
+        .select('id', 'username', 'email', 'role', 'is_active', 'last_login', 'created_at', 'updated_at')
         .where({ id: request.params.id })
         .first()
       if (!user) return reply.status(404).send({ error: 'Not Found', message: 'User not found' })
@@ -50,7 +50,6 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         password: passwordHash,
         role: input.role ?? 'user',
         is_active: true,
-        require_password: input.requirePassword ?? true,
       })
 
       const user = await app.db('users')
@@ -78,7 +77,6 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         ...(input.email !== undefined && { email: input.email }),
         ...(input.role && { role: input.role }),
         ...(input.isActive !== undefined && { is_active: input.isActive }),
-        ...(input.requirePassword !== undefined && { require_password: input.requirePassword }),
         updated_at: new Date(),
       }
 
@@ -441,14 +439,10 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       const compression = node.compression || 'lz4-v2'
       
       // Build config with node-specific settings
-      // Include auth-user-pass only if user requires password authentication
-      const authUserPass = user.require_password !== false ? 'auth-user-pass\nauth-nocache' : ''
-      
       let config = `client
 dev tun
 proto ${protocol}
 remote ${node.ip_address} ${node.port}
-${authUserPass}
 resolv-retry infinite
 nobind
 persist-key
