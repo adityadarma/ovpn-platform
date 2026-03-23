@@ -68,8 +68,8 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
         env: { 
           ...process.env, 
           EASYRSA_BATCH: '1',
-          EASYRSA_PASSOUT: `pass:${password}`,
-          EASYRSA_CERT_EXPIRE: certValidDays.toString()
+          EASYRSA_CERT_EXPIRE: certValidDays.toString(),
+          EASYRSA_PASSOUT: `pass:${password}`
         },
         stdio: 'pipe'
       })

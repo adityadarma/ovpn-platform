@@ -135,12 +135,11 @@ install_openvpn() {
     ./easyrsa init-pki >/dev/null 2>&1
     EASYRSA_BATCH=1 ./easyrsa build-ca nopass >/dev/null 2>&1
     EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass >/dev/null 2>&1
-    EASYRSA_BATCH=1 ./easyrsa gen-dh >/dev/null 2>&1
     
     # Setup server directory
     mkdir -p /etc/openvpn/server /var/log/openvpn
     openvpn --genkey secret /etc/openvpn/server/tls-crypt.key
-    cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem /etc/openvpn/server/
+    cp pki/ca.crt pki/private/server.key pki/issued/server.crt /etc/openvpn/server/
     
     # Create config
     cat > /etc/openvpn/server/server.conf <<'EOF'
@@ -151,7 +150,7 @@ dev tun
 ca /etc/openvpn/server/ca.crt
 cert /etc/openvpn/server/server.crt
 key /etc/openvpn/server/server.key
-dh /etc/openvpn/server/dh.pem
+dh none
 tls-crypt /etc/openvpn/server/tls-crypt.key
 
 server 10.8.0.0 255.255.255.0
@@ -159,9 +158,14 @@ topology subnet
 
 push "dhcp-option DNS 8.8.8.8"
 push "dhcp-option DNS 1.1.1.1"
+push "redirect-gateway def1 bypass-dhcp"
 
 keepalive 10 120
 cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC
+auth SHA256
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
 persist-key
 persist-tun
 
@@ -879,17 +883,14 @@ main() {
     download_files
     configure_env
     
-    # Install OpenVPN if all-in-one mode (but don't add agent to compose yet)
-    if [ "$INSTALL_AGENT" = true ]; then
-        install_openvpn
-    fi
-    
     pull_images
     start_services
     wait_for_health
     
-    # Register node and setup agent if all-in-one mode
+    # Install OpenVPN and setup agent if all-in-one mode
+    # (After core services are ready so hooks can connect to API)
     if [ "$INSTALL_AGENT" = true ]; then
+        install_openvpn
         register_node
         
         # Now add agent to compose with proper credentials

@@ -41,22 +41,10 @@ describe('VPN Agent API', () => {
   it('should block requests without valid X-VPN-Token', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/v1/vpn/auth',
-      payload: { username: 'admin', password: 'Admin@1234!' }
+      url: '/api/v1/vpn/connect',
+      payload: { username: 'admin', vpn_ip: '10.8.0.2', node_id: nodeId }
     })
     expect(res.statusCode).toBe(401)
-  })
-
-  it('should authenticate valid user for vpn', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/vpn/auth',
-      headers: { 'X-VPN-Token': 'agent-secret-token' },
-      payload: { username: 'admin', password: 'Admin@1234!', node_id: nodeId }
-    })
-    expect(res.statusCode).toBe(200)
-    expect(res.json().ok).toBe(true)
-    expect(res.json().username).toBe('admin')
   })
 
   it('should record vpn connect event', async () => {

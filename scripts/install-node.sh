@@ -86,12 +86,11 @@ if [ ! -d "/etc/openvpn/server" ]; then
     ./easyrsa init-pki >/dev/null 2>&1
     EASYRSA_BATCH=1 ./easyrsa build-ca nopass >/dev/null 2>&1
     EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass >/dev/null 2>&1
-    EASYRSA_BATCH=1 ./easyrsa gen-dh >/dev/null 2>&1
     
     # Setup server directory
     mkdir -p /etc/openvpn/server /var/log/openvpn
     openvpn --genkey secret /etc/openvpn/server/tls-crypt.key
-    cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem /etc/openvpn/server/
+    cp pki/ca.crt pki/private/server.key pki/issued/server.crt /etc/openvpn/server/
     
     # Create config
     cat > /etc/openvpn/server/server.conf <<'EOF'
@@ -102,7 +101,7 @@ dev tun
 ca /etc/openvpn/server/ca.crt
 cert /etc/openvpn/server/server.crt
 key /etc/openvpn/server/server.key
-dh /etc/openvpn/server/dh.pem
+dh none
 tls-crypt /etc/openvpn/server/tls-crypt.key
 
 server 10.8.0.0 255.255.255.0
@@ -110,16 +109,21 @@ topology subnet
 
 push "dhcp-option DNS 8.8.8.8"
 push "dhcp-option DNS 1.1.1.1"
+push "redirect-gateway def1 bypass-dhcp"
 
 keepalive 10 120
 cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC
+auth SHA256
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
 persist-key
 persist-tun
 
 user nobody
 group nogroup
 
-# Management Interface (v2.0) - bind to 0.0.0.0 for Docker access
+# Management Interface (bind to 0.0.0.0 for Docker access)
 management 0.0.0.0 7505
 management-client-auth
 

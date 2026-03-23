@@ -439,9 +439,11 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       const compression = node.compression || 'lz4-v2'
       
       // Build config with node-specific settings
+      const protoClient = protocol === 'tcp' ? 'tcp-client' : protocol
+      
       let config = `client
 dev tun
-proto ${protocol}
+proto ${protoClient}
 remote ${node.ip_address} ${node.port}
 resolv-retry infinite
 nobind
@@ -449,8 +451,13 @@ persist-key
 persist-tun
 remote-cert-tls server
 cipher ${cipher}
+data-ciphers ${cipher}:AES-256-GCM:AES-128-GCM:AES-256-CBC
 auth ${authDigest}
+tls-version-min 1.2
+tls-client
 ${compression !== 'none' ? `compress ${compression}` : ''}
+ignore-unknown-option block-outside-dns data-ciphers
+setenv opt block-outside-dns
 verb 3
 
 <ca>

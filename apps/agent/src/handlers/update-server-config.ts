@@ -48,7 +48,7 @@ dev tun
 ca /etc/openvpn/server/ca.crt
 cert /etc/openvpn/server/server.crt
 key /etc/openvpn/server/server.key
-dh /etc/openvpn/server/dh.pem
+dh none
 tls-crypt /etc/openvpn/server/tls-crypt.key
 
 server ${config.vpnNetwork} ${config.vpnNetmask}
@@ -78,6 +78,10 @@ topology subnet
 # Connection Settings
 keepalive ${config.keepalivePing} ${config.keepaliveTimeout}
 cipher ${config.cipher}
+data-ciphers ${config.cipher}:AES-256-GCM:AES-128-GCM:AES-256-CBC
+auth SHA256
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
 persist-key
 persist-tun
 `
@@ -91,8 +95,8 @@ persist-tun
 user nobody
 group nogroup
 
-# Management Interface
-management 127.0.0.1 7505
+# Management Interface (bind to 0.0.0.0 for Docker access)
+management 0.0.0.0 7505
 management-client-auth
 
 # Logging
@@ -100,6 +104,8 @@ status /var/log/openvpn/status.log
 status-version 3
 log /var/log/openvpn/openvpn.log
 verb 3
+
+script-security 2
 `
 
     // Add custom server config if provided
