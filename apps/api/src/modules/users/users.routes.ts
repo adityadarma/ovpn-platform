@@ -442,21 +442,22 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       const protoClient = protocol === 'tcp' ? 'tcp-client' : protocol
       
       let config = `client
-dev tun
 proto ${protoClient}
+${protocol === 'udp' ? 'explicit-exit-notify' : ''}
 remote ${node.ip_address} ${node.port}
+dev tun
 resolv-retry infinite
 nobind
 persist-key
 persist-tun
 remote-cert-tls server
-cipher ${cipher}
-data-ciphers ${cipher}:AES-256-GCM:AES-128-GCM:AES-256-CBC
 auth ${authDigest}
-tls-version-min 1.2
+auth-nocache
+cipher ${cipher}
 tls-client
-${compression !== 'none' ? `compress ${compression}` : ''}
-ignore-unknown-option block-outside-dns data-ciphers
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns
 verb 3
 

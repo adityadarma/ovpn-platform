@@ -78,10 +78,11 @@ topology subnet
 # Connection Settings
 keepalive ${config.keepalivePing} ${config.keepaliveTimeout}
 cipher ${config.cipher}
-data-ciphers ${config.cipher}:AES-256-GCM:AES-128-GCM:AES-256-CBC
+ncp-ciphers ${config.cipher}
 auth SHA256
+tls-server
 tls-version-min 1.2
-tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
 persist-key
 persist-tun
 `
@@ -106,6 +107,10 @@ log /var/log/openvpn/openvpn.log
 verb 3
 
 script-security 2
+
+# VPN Hooks (Certificate-only authentication)
+client-connect /usr/local/bin/vpn-connect
+client-disconnect /usr/local/bin/vpn-disconnect
 `
 
     // Add custom server config if provided
