@@ -73,6 +73,7 @@ echo ""
 # Generate secrets
 info "Generating secrets..."
 JWT_SECRET=$(openssl rand -base64 32)
+VPN_TOKEN=$(openssl rand -hex 32)
 ok "Secrets generated"
 echo ""
 
@@ -181,12 +182,12 @@ ${POSTGRES_PASSWORD:+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}}
 # MySQL (if selected)
 ${MYSQL_PASSWORD:+MYSQL_PASSWORD=${MYSQL_PASSWORD}}
 ${MYSQL_ROOT_PASSWORD:+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}}
-
 # API
 JWT_SECRET=${JWT_SECRET}
 API_URL=${API_URL}
 CORS_ORIGIN=${WEB_URL}
 API_PORT=${API_PORT}
+VPN_TOKEN=${VPN_TOKEN}
 
 # Web
 NEXT_PUBLIC_API_URL=${API_URL}
@@ -237,10 +238,13 @@ echo "  Web UI: $WEB_URL"
 echo "  API: $API_URL"
 echo ""
 echo "Default Credentials:"
-echo "  Username: admin"
-echo "  Password: Admin@1234!"
-echo ""
 echo "Node Registration Key:"
+echo "  $NODE_REG_KEY"
+echo ""
+echo "VPN Token (for node authentication):"
+echo "  $VPN_TOKEN"
+echo ""
+echo "Next Steps:"ation Key:"
 echo "  $NODE_REG_KEY"
 echo ""
 echo "Next Steps:"
