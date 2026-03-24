@@ -108,12 +108,6 @@ export default function LoginPage() {
                 />
               </div>
 
-              {error && (
-                <Alert variant="destructive" className="py-2.5">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
               <Button
                 type="submit"
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"

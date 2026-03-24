@@ -9,7 +9,28 @@
 #   - Install/update Agent only
 #
 # Usage:
-#   sudo bash scripts/install-node.sh
+#   Interactive mode:
+#     sudo bash scripts/install-node.sh
+#
+#   Non-interactive mode (auto-registration):
+#     MANAGER_URL=https://api-vpn.example.com \
+#     VPN_TOKEN=your-vpn-token \
+#     REG_KEY=your-registration-key \
+#     curl -fsSL https://raw.githubusercontent.com/.../install-node.sh | sudo bash
+#
+#   Non-interactive mode (manual registration):
+#     MANAGER_URL=https://api-vpn.example.com \
+#     VPN_TOKEN=your-vpn-token \
+#     AGENT_NODE_ID=your-node-id \
+#     AGENT_SECRET_TOKEN=your-secret-token \
+#     curl -fsSL https://raw.githubusercontent.com/.../install-node.sh | sudo bash
+#
+# Environment Variables:
+#   MANAGER_URL or AGENT_API_MANAGER_URL - Manager API URL
+#   VPN_TOKEN - VPN authentication token
+#   REG_KEY or NODE_REGISTRATION_KEY - Registration key (for auto-registration)
+#   AGENT_NODE_ID - Node ID (for manual registration)
+#   AGENT_SECRET_TOKEN - Secret token (for manual registration)
 # ============================================================
 
 set -e
@@ -30,6 +51,12 @@ echo -e "${B}============================================================"
 echo "  VPN Manager - Node Installation/Update"
 echo "============================================================${NC}"
 echo ""
+
+# Show environment variable support
+if [ -n "$MANAGER_URL" ] || [ -n "$AGENT_API_MANAGER_URL" ] || [ -n "$VPN_TOKEN" ]; then
+    info "Environment variables detected - using non-interactive mode"
+    echo ""
+fi
 
 # Detect existing installation
 OPENVPN_INSTALLED=false
@@ -241,60 +268,135 @@ install_agent() {
         fi
     fi
     
-    # Get manager URL
+    # Check for environment variables (support both naming conventions)
+    ENV_MANAGER_URL="${MANAGER_URL:-${AGENT_API_MANAGER_URL}}"
+    ENV_REG_KEY="${REG_KEY:-${NODE_REGISTRATION_KEY}}"
+    ENV_VPN_TOKEN="${VPN_TOKEN}"
+    ENV_NODE_ID="${AGENT_NODE_ID}"
+    ENV_SECRET_TOKEN="${AGENT_SECRET_TOKEN}"
+    
+    # Determine registration mode
+    AUTO_REGISTER=false
+    MANUAL_REGISTER=false
+    
+    if [ -n "$ENV_MANAGER_URL" ] && [ -n "$ENV_REG_KEY" ] && [ -n "$ENV_VPN_TOKEN" ]; then
+        AUTO_REGISTER=true
+        info "Auto-registration mode detected (using environment variables)"
+    elif [ -n "$ENV_MANAGER_URL" ] && [ -n "$ENV_VPN_TOKEN" ] && [ -n "$ENV_NODE_ID" ] && [ -n "$ENV_SECRET_TOKEN" ]; then
+        MANUAL_REGISTER=true
+        info "Manual registration mode detected (using environment variables)"
+    fi
+    
+    # Get configuration interactively if not provided via environment
     echo ""
-    read -p "Manager API URL (e.g., http://manager-ip:3000): " MANAGER_URL </dev/tty
-    read -p "Node registration key: " REG_KEY </dev/tty
+    if [ "$AUTO_REGISTER" = false ] && [ "$MANUAL_REGISTER" = false ]; then
+        # Interactive mode
+        read -p "Manager API URL (e.g., https://api-vpn.example.com): " MANAGER_URL </dev/tty
+        ENV_MANAGER_URL="$MANAGER_URL"
+        
+        read -p "VPN Token: " VPN_TOKEN </dev/tty
+        ENV_VPN_TOKEN="$VPN_TOKEN"
+        
+        echo ""
+        echo "Registration mode:"
+        echo "1) Auto-register (using registration key)"
+        echo "2) Manual (using existing Node ID and Secret Token)"
+        read -p "Choice [1-2]: " reg_mode </dev/tty
+        
+        if [ "$reg_mode" = "1" ]; then
+            read -p "Node registration key: " REG_KEY </dev/tty
+            ENV_REG_KEY="$REG_KEY"
+            AUTO_REGISTER=true
+        else
+            read -p "Node ID: " NODE_ID </dev/tty
+            ENV_NODE_ID="$NODE_ID"
+            read -p "Secret Token: " SECRET_TOKEN </dev/tty
+            ENV_SECRET_TOKEN="$SECRET_TOKEN"
+            MANUAL_REGISTER=true
+        fi
+    fi
     
     # Get server info
     SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
     HOSTNAME=$(hostname)
     
-    # Create .env
-    cat > .env <<EOF
-AGENT_MANAGER_URL=${MANAGER_URL}
+    # Create .env file
+    if [ "$AUTO_REGISTER" = true ]; then
+        # Auto-registration: create .env with empty credentials (will be filled after registration)
+        cat > .env <<EOF
+AGENT_MANAGER_URL=${ENV_MANAGER_URL}
+VPN_TOKEN=${ENV_VPN_TOKEN}
 AGENT_NODE_ID=
 AGENT_SECRET_TOKEN=
-AGENT_POLL_INTERVAL=10000
-AGENT_HEARTBEAT_INTERVAL=30000
+AGENT_POLL_INTERVAL_MS=5000
+AGENT_HEARTBEAT_INTERVAL_MS=30000
+VPN_MANAGEMENT_HOST=127.0.0.1
+VPN_MANAGEMENT_PORT=7505
+VPN_MANAGEMENT_PASSWORD=
 EOF
+        
+        # Register node
+        info "Registering node with Manager..."
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${ENV_MANAGER_URL}/api/v1/nodes/register" \
+            -H "Content-Type: application/json" \
+            -H "X-VPN-Token: ${ENV_VPN_TOKEN}" \
+            -d "{\"hostname\":\"$HOSTNAME\",\"ip\":\"$SERVER_IP\",\"port\":1194,\"version\":\"auto\",\"registrationKey\":\"$ENV_REG_KEY\"}")
+        
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+        
+        if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+            NODE_ID=$(echo "$BODY" | grep -o '"id":"[^"]*' | cut -d'"' -f4)
+            SECRET_TOKEN=$(echo "$BODY" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+            
+            if [ -n "$NODE_ID" ] && [ -n "$SECRET_TOKEN" ]; then
+                # Update .env with credentials
+                sed -i "s|AGENT_NODE_ID=.*|AGENT_NODE_ID=$NODE_ID|" .env
+                sed -i "s|AGENT_SECRET_TOKEN=.*|AGENT_SECRET_TOKEN=$SECRET_TOKEN|" .env
+                ok "Node registered successfully: $NODE_ID"
+            else
+                error "Failed to parse registration response"
+                warn "Please register manually and update .env file"
+            fi
+        else
+            error "Node registration failed (HTTP $HTTP_CODE)"
+            warn "Response: $BODY"
+            warn "Please register manually and update .env file"
+        fi
+    else
+        # Manual registration: use provided credentials
+        cat > .env <<EOF
+AGENT_MANAGER_URL=${ENV_MANAGER_URL}
+VPN_TOKEN=${ENV_VPN_TOKEN}
+AGENT_NODE_ID=${ENV_NODE_ID}
+AGENT_SECRET_TOKEN=${ENV_SECRET_TOKEN}
+AGENT_POLL_INTERVAL_MS=5000
+AGENT_HEARTBEAT_INTERVAL_MS=30000
+VPN_MANAGEMENT_HOST=127.0.0.1
+VPN_MANAGEMENT_PORT=7505
+VPN_MANAGEMENT_PASSWORD=
+EOF
+        ok "Configuration saved with provided credentials"
+    fi
     
     # Start agent
+    info "Starting agent..."
     docker compose pull
     docker compose up -d
     
     sleep 3
     
-    # Register node
-    info "Registering node..."
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${MANAGER_URL}/api/v1/nodes/register" \
-        -H "Content-Type: application/json" \
-        -d "{\"hostname\":\"$HOSTNAME\",\"ip\":\"$SERVER_IP\",\"port\":1194,\"version\":\"auto\",\"registrationKey\":\"$REG_KEY\"}")
-    
-    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-    BODY=$(echo "$RESPONSE" | sed '$d')
-    
-    if [ "$HTTP_CODE" == "201" ]; then
-        NODE_ID=$(echo "$BODY" | grep -o '"id":"[^"]*' | cut -d'"' -f4)
-        SECRET_TOKEN=$(echo "$BODY" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
-        
-        # Update .env
-        sed -i "s|AGENT_NODE_ID=.*|AGENT_NODE_ID=$NODE_ID|" .env
-        sed -i "s|AGENT_SECRET_TOKEN=.*|AGENT_SECRET_TOKEN=$SECRET_TOKEN|" .env
-        
-        # Restart agent
-        docker compose restart
-        
-        ok "Node registered: $NODE_ID"
+    if docker ps --filter name=vpn-agent --format '{{.Status}}' | grep -q "Up"; then
+        ok "Agent started successfully"
     else
-        warn "Node registration failed (HTTP $HTTP_CODE)"
-        info "You can register manually later"
+        warn "Agent may not be running properly"
+        info "Check logs: docker logs vpn-agent"
     fi
     
     # Install VPN hooks
     install_vpn_hooks
     
-    ok "Agent installed"
+    ok "Agent installation complete"
 }
 
 install_vpn_hooks() {
@@ -309,7 +411,7 @@ install_vpn_hooks() {
 [ -f "/opt/vpn-agent/.env" ] && source /opt/vpn-agent/.env
 curl -s -X POST "${AGENT_MANAGER_URL}/api/v1/vpn/connect" \
     -H "Content-Type: application/json" \
-    -H "X-VPN-Token: ${AGENT_SECRET_TOKEN}" \
+    -H "X-VPN-Token: ${VPN_TOKEN}" \
     -d "{\"username\":\"${common_name}\",\"vpn_ip\":\"${ifconfig_pool_remote_ip}\",\"real_ip\":\"${trusted_ip}\",\"node_id\":\"${AGENT_NODE_ID}\"}" > /dev/null 2>&1
 exit 0
 EOF
@@ -320,7 +422,7 @@ EOF
 [ -f "/opt/vpn-agent/.env" ] && source /opt/vpn-agent/.env
 curl -s -X POST "${AGENT_MANAGER_URL}/api/v1/vpn/disconnect" \
     -H "Content-Type: application/json" \
-    -H "X-VPN-Token: ${AGENT_SECRET_TOKEN}" \
+    -H "X-VPN-Token: ${VPN_TOKEN}" \
     -d "{\"username\":\"${common_name}\",\"vpn_ip\":\"${ifconfig_pool_remote_ip}\",\"bytes_sent\":\"${bytes_sent}\",\"bytes_received\":\"${bytes_received}\",\"duration\":\"${time_duration}\"}" > /dev/null 2>&1
 exit 0
 EOF
