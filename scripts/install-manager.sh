@@ -139,8 +139,8 @@ if [[ "$SERVER_DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     read -p "API port (default: 3001): " API_PORT </dev/tty
     API_PORT=${API_PORT:-3001}
     
-    WEB_URL_VALUE="$PROTOCOL://$SERVER_DOMAIN:$WEB_PORT"
-    API_URL_VALUE="$PROTOCOL://$SERVER_DOMAIN:$API_PORT"
+    WEB_URL="$PROTOCOL://$SERVER_DOMAIN:$WEB_PORT"
+    API_URL="$PROTOCOL://$SERVER_DOMAIN:$API_PORT"
 else
     # It's a domain - ask for separate domains for Web and API
     echo ""
@@ -156,8 +156,8 @@ else
     read -p "API port (default: 3001): " API_PORT </dev/tty
     API_PORT=${API_PORT:-3001}
     
-    WEB_URL_VALUE="$PROTOCOL://$SERVER_DOMAIN"
-    API_URL_VALUE="$PROTOCOL://$API_DOMAIN"
+    WEB_URL="$PROTOCOL://$SERVER_DOMAIN"
+    API_URL="$PROTOCOL://$API_DOMAIN"
 fi
 
 # Node registration key
@@ -238,7 +238,7 @@ echo "  API: $API_URL"
 echo ""
 echo "Default Credentials:"
 echo "  Username: admin"
-echo "  Password: admin123"
+echo "  Password: Admin@1234!"
 echo ""
 echo "Node Registration Key:"
 echo "  $NODE_REG_KEY"
