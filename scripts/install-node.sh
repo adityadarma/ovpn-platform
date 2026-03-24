@@ -12,25 +12,36 @@
 #   Interactive mode:
 #     sudo bash scripts/install-node.sh
 #
-#   Non-interactive mode (auto-registration):
-#     MANAGER_URL=https://api-vpn.example.com \
-#     VPN_TOKEN=your-vpn-token \
-#     REG_KEY=your-registration-key \
-#     curl -fsSL https://raw.githubusercontent.com/.../install-node.sh | sudo bash
+#   Non-interactive mode (pass as arguments):
+#     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | \
+#     sudo bash -s -- \
+#       MANAGER_URL=https://api-vpn.example.com \
+#       VPN_TOKEN=your-vpn-token \
+#       REG_KEY=your-registration-key
 #
-#   Non-interactive mode (manual registration):
-#     MANAGER_URL=https://api-vpn.example.com \
-#     VPN_TOKEN=your-vpn-token \
-#     AGENT_NODE_ID=your-node-id \
-#     AGENT_SECRET_TOKEN=your-secret-token \
-#     curl -fsSL https://raw.githubusercontent.com/.../install-node.sh | sudo bash
+#   Or download first:
+#     curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh -o install-node.sh
+#     sudo bash install-node.sh \
+#       MANAGER_URL=https://api-vpn.example.com \
+#       VPN_TOKEN=your-vpn-token \
+#       REG_KEY=your-registration-key
 #
-# Environment Variables:
+#   Or use sudo -E:
+#     export MANAGER_URL=https://api-vpn.example.com
+#     export VPN_TOKEN=your-vpn-token
+#     export REG_KEY=your-registration-key
+#     sudo -E bash install-node.sh
+#
+# Environment Variables (Auto-registration):
 #   MANAGER_URL or AGENT_API_MANAGER_URL - Manager API URL
 #   VPN_TOKEN - VPN authentication token
-#   REG_KEY or NODE_REGISTRATION_KEY - Registration key (for auto-registration)
-#   AGENT_NODE_ID - Node ID (for manual registration)
-#   AGENT_SECRET_TOKEN - Secret token (for manual registration)
+#   REG_KEY or NODE_REGISTRATION_KEY - Registration key
+#
+# Environment Variables (Manual registration):
+#   MANAGER_URL or AGENT_API_MANAGER_URL - Manager API URL
+#   VPN_TOKEN - VPN authentication token
+#   AGENT_NODE_ID - Node ID
+#   AGENT_SECRET_TOKEN - Secret token
 # ============================================================
 
 set -e
@@ -46,6 +57,14 @@ INSTALL_DIR="/opt/vpn-agent"
 
 # Check root
 [ "$EUID" -ne 0 ] && { error "Must run as root"; exit 1; }
+
+# Preserve environment variables from command line arguments
+# This allows: sudo bash install-node.sh MANAGER_URL=... VPN_TOKEN=... REG_KEY=...
+for arg in "$@"; do
+    if [[ "$arg" == *"="* ]]; then
+        export "$arg"
+    fi
+done
 
 echo -e "${B}============================================================"
 echo "  VPN Manager - Node Installation/Update"

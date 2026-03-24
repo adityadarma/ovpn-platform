@@ -32,9 +32,6 @@ Access: http://YOUR_SERVER_IP:3000 (admin / Admin@1234!)
 ### Step 2: Install VPN Node (Second)
 
 ```bash
-MANAGER_URL=http://YOUR_MANAGER_IP:3001 \
-VPN_TOKEN=your-vpn-token \
-REG_KEY=your-registration-key \
 curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
 ```
 

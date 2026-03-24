@@ -111,9 +111,6 @@ Access: http://YOUR_SERVER_IP:3000 (admin / Admin@1234!)
 ### Step 2: Install VPN Node (Second)
 
 ```bash
-MANAGER_URL=http://YOUR_MANAGER_IP:3001 \
-VPN_TOKEN=your-vpn-token \
-REG_KEY=your-registration-key \
 curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
 ```
 
@@ -183,6 +180,37 @@ This will:
 
 **Time**: ~5 minutes
 
+### Non-Interactive Installation (CI/CD, Automation) 🤖
+
+For automated deployments, pass environment variables as arguments:
+
+**Auto-registration mode:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | \
+sudo bash -s -- \
+  MANAGER_URL=https://api-vpn.example.com \
+  VPN_TOKEN=your-vpn-token \
+  REG_KEY=your-registration-key
+```
+
+**Manual registration mode:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | \
+sudo bash -s -- \
+  MANAGER_URL=https://api-vpn.example.com \
+  VPN_TOKEN=your-vpn-token \
+  AGENT_NODE_ID=your-node-id \
+  AGENT_SECRET_TOKEN=your-secret-token
+```
+
+Perfect for:
+- Terraform / Ansible / CloudFormation
+- CI/CD pipelines
+- Bulk node provisioning
+- Infrastructure as Code
+
+**📖 Complete Guide:** [NON-INTERACTIVE-INSTALLATION.md](docs/NON-INTERACTIVE-INSTALLATION.md)
+
 ### Registration Options
 
 **Option 1: Auto-register (Recommended)**
@@ -196,10 +224,11 @@ docker compose restart api
 
 Then install with key:
 ```bash
-MANAGER_URL=https://manager.example.com \
-VPN_TOKEN=your-vpn-token \
-REG_KEY=your-registration-key \
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | \
+sudo bash -s -- \
+  MANAGER_URL=https://manager.example.com \
+  VPN_TOKEN=your-vpn-token \
+  REG_KEY=your-registration-key
 ```
 
 **Option 2: Manual register**

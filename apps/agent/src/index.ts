@@ -10,6 +10,7 @@ import { loadAgentEnv } from './config/env'
 import { startPoller } from './core/poller'
 import { startHeartbeat } from './core/heartbeat'
 import { OpenVpnManagementDriver, WireGuardDriver, type VpnDriver } from './drivers'
+import { handleSyncCertificates } from './handlers/sync-certificates'
 
 /**
  * Create VPN driver based on configuration
@@ -28,6 +29,55 @@ function createVpnDriver(env: ReturnType<typeof loadAgentEnv>): VpnDriver {
     
     default:
       throw new Error(`Unsupported VPN type: ${env.VPN_TYPE}`)
+  }
+}
+
+/**
+ * Check if certificates are synced to database
+ */
+async function checkCertificatesSync(env: ReturnType<typeof loadAgentEnv>): Promise<boolean> {
+  try {
+    const response = await fetch(`${env.AGENT_MANAGER_URL}/api/v1/nodes/${env.AGENT_NODE_ID}`, {
+      headers: {
+        'Authorization': `Bearer ${env.AGENT_SECRET_TOKEN}`,
+      },
+    })
+
+    if (!response.ok) {
+      console.warn('[startup] Failed to check node status:', response.status)
+      return false
+    }
+
+    const node = await response.json() as { ca_cert?: string; ta_key?: string }
+    return !!(node.ca_cert && node.ta_key)
+  } catch (error) {
+    console.warn('[startup] Failed to check certificates:', (error as Error).message)
+    return false
+  }
+}
+
+/**
+ * Sync certificates on startup if needed
+ */
+async function syncCertificatesOnStartup(driver: VpnDriver): Promise<void> {
+  const env = loadAgentEnv()
+  
+  console.log('[startup] Checking if certificates are synced...')
+  const hasCerts = await checkCertificatesSync(env)
+  
+  if (hasCerts) {
+    console.log('[startup] ✓ Certificates already synced')
+    return
+  }
+  
+  console.log('[startup] Certificates not found in database, syncing now...')
+  
+  try {
+    await handleSyncCertificates({}, driver)
+    console.log('[startup] ✓ Certificates synced successfully')
+  } catch (error) {
+    console.error('[startup] ✗ Failed to sync certificates:', (error as Error).message)
+    console.warn('[startup] Certificates will be synced via task queue')
   }
 }
 
@@ -58,6 +108,9 @@ async function main() {
     console.error(`✗ Failed to connect to ${env.VPN_TYPE.toUpperCase()} management interface:`, (err as Error).message)
     console.warn(`  Agent will continue but VPN monitoring will be unavailable`)
   }
+
+  // Sync certificates on startup if needed
+  await syncCertificatesOnStartup(driver)
 
   // Start services
   startHeartbeat(env, driver)

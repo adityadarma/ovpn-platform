@@ -333,10 +333,33 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
     { schema: { tags: ['nodes'], summary: 'Agent heartbeat' } },
     async (request) => {
       const { nodeId, caCert, taKey } = HeartbeatSchema.parse(request.body)
+      
+      // Get current node status
+      const currentNode = await app.db('vpn_nodes').where({ id: nodeId }).first()
+      const wasOffline = currentNode?.status === 'offline'
+      
       const updates: any = { status: 'online', last_seen: new Date() }
       if (caCert) updates.ca_cert = caCert
       if (taKey) updates.ta_key = taKey
       await app.db('vpn_nodes').where({ id: nodeId }).update(updates)
+      
+      // If node was offline and now online, trigger certificate sync
+      if (wasOffline && (!currentNode?.ca_cert || !currentNode?.ta_key)) {
+        app.log.info(`Node ${nodeId} came online without certificates, creating sync task`)
+        
+        const taskId = crypto.randomUUID()
+        await app.db('tasks').insert({
+          id: taskId,
+          node_id: nodeId,
+          action: 'sync_certificates',
+          payload: JSON.stringify({}),
+          status: 'pending',
+          created_at: new Date(),
+        })
+        
+        return { ok: true, sync_requested: true, task_id: taskId }
+      }
+      
       return { ok: true }
     },
   )

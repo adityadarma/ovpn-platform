@@ -66,23 +66,25 @@ Now install VPN Node on a separate server.
 
 ### Install VPN Node
 
-**Using Auto-Register:**
+**Auto-registration mode:**
 
 ```bash
-MANAGER_URL=http://YOUR_MANAGER_IP:3001 \
-VPN_TOKEN=your-vpn-token \
-REG_KEY=your-registration-key \
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | \
+sudo bash -s -- \
+  MANAGER_URL=https://api-vpn.example.com \
+  VPN_TOKEN=your-vpn-token \
+  REG_KEY=your-registration-key
 ```
 
-**Using Manual Register:**
+**Manual registration mode:**
 
 ```bash
-MANAGER_URL=http://YOUR_MANAGER_IP:3001 \
-VPN_TOKEN=your-vpn-token \
-NODE_ID=your-node-id \
-SECRET_TOKEN=your-secret-token \
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | \
+sudo bash -s -- \
+  MANAGER_URL=https://api-vpn.example.com \
+  VPN_TOKEN=your-vpn-token \
+  AGENT_NODE_ID=your-node-id \
+  AGENT_SECRET_TOKEN=your-secret-token
 ```
 
 ### Interactive Install
