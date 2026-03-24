@@ -109,12 +109,19 @@ case $db_choice in
 esac
 echo ""
 
-# Get server info
+# Get server IP or domain
 SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
-echo "Server domain or IP for Web UI access:"
-read -p "Domain/IP (default: $SERVER_IP): " SERVER_DOMAIN </dev/tty
+echo ""
+echo "Enter your server domain or IP address."
+echo "This will be used for:"
+echo "  - Web UI access URL"
+echo "  - API CORS configuration"
+echo "  - Client configuration"
+read -p "Server domain/IP (default: $SERVER_IP): " SERVER_DOMAIN </dev/tty
 SERVER_DOMAIN=${SERVER_DOMAIN:-$SERVER_IP}
 
+# Ask for protocol first
+echo ""
 read -p "Use HTTPS? [y/N]: " USE_HTTPS </dev/tty
 if [[ "$USE_HTTPS" == "y" || "$USE_HTTPS" == "Y" ]]; then
     PROTOCOL="https"
@@ -122,17 +129,35 @@ else
     PROTOCOL="http"
 fi
 
-# Ports
+# Check if input is IP address or domain
 if [[ "$SERVER_DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    read -p "Web UI port (default: 80): " WEB_PORT </dev/tty
-    WEB_PORT=${WEB_PORT:-80}
-    read -p "API port (default: 3000): " API_PORT </dev/tty
-    API_PORT=${API_PORT:-3000}
-    WEB_URL="${PROTOCOL}://${SERVER_DOMAIN}:${WEB_PORT}"
-    API_URL="http://${SERVER_DOMAIN}:${API_PORT}"
+    # It's an IP address - ask for ports and include in URL
+    echo ""
+    echo "Configure ports (will be included in URLs for IP address):"
+    read -p "Web UI port (default: 3000): " WEB_PORT </dev/tty
+    WEB_PORT=${WEB_PORT:-3000}
+    read -p "API port (default: 3001): " API_PORT </dev/tty
+    API_PORT=${API_PORT:-3001}
+    
+    WEB_URL_VALUE="$PROTOCOL://$SERVER_DOMAIN:$WEB_PORT"
+    API_URL_VALUE="$PROTOCOL://$SERVER_DOMAIN:$API_PORT"
 else
-    WEB_URL="${PROTOCOL}://${SERVER_DOMAIN}"
-    API_URL="${PROTOCOL}://${SERVER_DOMAIN}/api"
+    # It's a domain - ask for separate domains for Web and API
+    echo ""
+    echo "Configure domains:"
+    echo "Example: Web UI = vpn.example.com, API = api.vpn.example.com"
+    read -p "API domain (default: api.$SERVER_DOMAIN): " API_DOMAIN </dev/tty
+    API_DOMAIN=${API_DOMAIN:-api.$SERVER_DOMAIN}
+    
+    echo ""
+    echo "Configure ports (for internal Docker configuration):"
+    read -p "Web UI port (default: 3000): " WEB_PORT </dev/tty
+    WEB_PORT=${WEB_PORT:-3000}
+    read -p "API port (default: 3001): " API_PORT </dev/tty
+    API_PORT=${API_PORT:-3001}
+    
+    WEB_URL_VALUE="$PROTOCOL://$SERVER_DOMAIN"
+    API_URL_VALUE="$PROTOCOL://$API_DOMAIN"
 fi
 
 # Node registration key
@@ -161,9 +186,11 @@ ${MYSQL_ROOT_PASSWORD:+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}}
 JWT_SECRET=${JWT_SECRET}
 API_URL=${API_URL}
 CORS_ORIGIN=${WEB_URL}
+API_PORT=${API_PORT}
 
 # Web
 NEXT_PUBLIC_API_URL=${API_URL}
+WEB_PORT=${WEB_PORT}
 
 # Node Registration
 NODE_REGISTRATION_KEY=${NODE_REG_KEY}
