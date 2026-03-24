@@ -38,19 +38,21 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
     throw new Error(`EasyRSA script not found at ${EASYRSA_BIN}. Please check VPN installation.`)
   }
 
+  console.log(`[generate-cert] Generating certificate for ${username} (valid for ${certValidDays === 36500 ? 'unlimited' : certValidDays + ' days'})...`)
+
   try {
-    // Check if client certificate already exists
+    // EasyRSA 3.x paths
     const certPath = `${EASYRSA_DIR}/pki/issued/${username}.crt`
     const keyPath = `${EASYRSA_DIR}/pki/private/${username}.key`
     const reqPath = `${EASYRSA_DIR}/pki/reqs/${username}.req`
     
-    // If any certificate files exist, clean them up completely
+    // Check if any certificate files exist
     const filesExist = existsSync(certPath) || existsSync(keyPath) || existsSync(reqPath)
     
     if (filesExist) {
-      console.log(`Certificate files for ${username} already exist, cleaning up...`)
+      console.log(`[generate-cert] Certificate files for ${username} already exist, performing cleanup...`)
       
-      // Try to revoke if certificate exists
+      // Step 1: Try to revoke if certificate exists
       if (existsSync(certPath)) {
         try {
           execSync(`${EASYRSA_BIN} revoke ${username}`, {
@@ -58,7 +60,7 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
             env: { ...process.env, EASYRSA_BATCH: '1' },
             stdio: 'pipe'
           })
-          console.log(`✓ Certificate revoked in PKI`)
+          console.log(`[generate-cert] ✓ Certificate revoked in PKI`)
           
           // Generate updated CRL after revocation
           try {
@@ -67,43 +69,88 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
               env: { ...process.env, EASYRSA_BATCH: '1' },
               stdio: 'pipe'
             })
-            console.log(`✓ CRL updated`)
+            console.log(`[generate-cert] ✓ CRL updated`)
           } catch (crlErr) {
-            console.warn(`Warning: Could not update CRL: ${crlErr}`)
+            console.warn(`[generate-cert] Warning: Could not update CRL`)
           }
         } catch (err) {
-          console.warn(`Warning: Could not revoke certificate (might not be in CRL yet)`)
+          console.warn(`[generate-cert] Warning: Could not revoke certificate (might not be in CRL yet)`)
         }
       }
       
-      // Force remove all certificate-related files
-      try {
-        execSync(`rm -f "${certPath}" "${keyPath}" "${reqPath}"`, {
-          stdio: 'pipe'
-        })
-        console.log(`✓ Old certificate files removed`)
-      } catch (err) {
-        console.warn(`Warning: Could not remove old certificate files: ${err}`)
-      }
-      
-      // Also remove from index if exists
+      // Step 2: Remove from PKI index database
       const indexPath = `${EASYRSA_DIR}/pki/index.txt`
+      
       if (existsSync(indexPath)) {
         try {
-          // Remove lines containing this username from index
-          execSync(`sed -i.bak '/CN=${username}$/d' "${indexPath}"`, {
-            stdio: 'pipe'
-          })
-          console.log(`✓ Removed from PKI index`)
+          // Create backup
+          execSync(`cp "${indexPath}" "${indexPath}.bak-$(date +%s)"`, { stdio: 'pipe' })
+          
+          // Remove all lines containing this username (both valid and revoked)
+          execSync(`sed -i '/CN=${username}$/d' "${indexPath}"`, { stdio: 'pipe' })
+          console.log(`[generate-cert] ✓ Removed from PKI index`)
         } catch (err) {
-          console.warn(`Warning: Could not update PKI index: ${err}`)
+          console.warn(`[generate-cert] Warning: Could not update PKI index`)
         }
       }
+      
+      // Step 3: Force remove ALL certificate-related files
+      try {
+        const filesToRemove = [
+          certPath,
+          keyPath,
+          reqPath,
+          `${EASYRSA_DIR}/pki/issued/${username}.*`,
+          `${EASYRSA_DIR}/pki/private/${username}.*`,
+          `${EASYRSA_DIR}/pki/inline/private/${username}.*`,
+          `${EASYRSA_DIR}/pki/reqs/${username}.*`,
+          `${EASYRSA_DIR}/pki/renewed/certs_by_serial/${username}.*`,
+          `${EASYRSA_DIR}/pki/renewed/private_by_serial/${username}.*`,
+          `${EASYRSA_DIR}/pki/renewed/reqs_by_serial/${username}.*`
+        ]
+        
+        for (const pattern of filesToRemove) {
+          try {
+            execSync(`rm -f ${pattern}`, { stdio: 'pipe' })
+          } catch (e) {
+            // Ignore errors for non-existent files
+          }
+        }
+        
+        console.log(`[generate-cert] ✓ All certificate files removed`)
+      } catch (err) {
+        console.warn(`[generate-cert] Warning: Could not remove some certificate files`)
+      }
+      
+      // Step 4: Clean up serial files if they reference this cert
+      try {
+        // Find and remove serial files that might reference this certificate
+        const serialFiles = execSync(
+          `grep -l "CN=${username}" ${EASYRSA_DIR}/pki/issued/*.crt 2>/dev/null | xargs -r basename -s .crt 2>/dev/null || true`,
+          { encoding: 'utf-8', stdio: 'pipe' }
+        ).trim()
+        
+        if (serialFiles) {
+          serialFiles.split('\n').forEach(serial => {
+            if (serial) {
+              try {
+                execSync(`rm -f "${EASYRSA_DIR}/pki/renewed/certs_by_serial/${serial}.crt"`, { stdio: 'pipe' })
+                execSync(`rm -f "${EASYRSA_DIR}/pki/renewed/private_by_serial/${serial}.key"`, { stdio: 'pipe' })
+                execSync(`rm -f "${EASYRSA_DIR}/pki/renewed/reqs_by_serial/${serial}.req"`, { stdio: 'pipe' })
+              } catch (e) {
+                // Ignore
+              }
+            }
+          })
+        }
+      } catch (err) {
+        // Ignore errors in serial cleanup
+      }
+      
+      console.log(`[generate-cert] ✓ Cleanup completed for ${username}`)
     }
 
-    // Generate client certificate
-    console.log(`Generating client certificate for ${username} (valid for ${certValidDays === 36500 ? 'unlimited' : certValidDays + ' days'})...`)
-    
+    // Generate client certificate with EasyRSA 3.x
     if (password) {
       // Generate with password-protected key
       execSync(`${EASYRSA_BIN} build-client-full ${username}`, {
@@ -140,7 +187,7 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
       return date.toISOString()
     })()
 
-    console.log(`✓ Client certificate generated for ${username}`)
+    console.log(`[generate-cert] ✓ Client certificate generated for ${username}`)
 
     return {
       clientCert,
@@ -149,7 +196,7 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
       expiresAt: expiresAt
     }
   } catch (error: any) {
-    console.error(`Failed to generate client certificate for ${username}:`, error.message)
+    console.error(`[generate-cert] Failed to generate client certificate for ${username}:`, error.message)
     
     // Provide more detailed error message
     let errorMsg = error.message
