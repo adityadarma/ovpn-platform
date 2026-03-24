@@ -44,24 +44,39 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
     const keyPath = `${EASYRSA_DIR}/pki/private/${username}.key`
     const reqPath = `${EASYRSA_DIR}/pki/reqs/${username}.req`
     
-    // If certificate exists, revoke and remove it first
-    if (existsSync(certPath)) {
-      console.log(`Certificate for ${username} already exists, removing...`)
+    // If any certificate files exist, clean them up completely
+    const filesExist = existsSync(certPath) || existsSync(keyPath) || existsSync(reqPath)
+    
+    if (filesExist) {
+      console.log(`Certificate files for ${username} already exist, cleaning up...`)
       
-      try {
-        // Try to revoke first
-        execSync(`${EASYRSA_BIN} revoke ${username}`, {
-          cwd: EASYRSA_DIR,
-          env: { ...process.env, EASYRSA_BATCH: '1' },
-          stdio: 'pipe'
-        })
-        console.log(`✓ Certificate revoked`)
-      } catch (err) {
-        // Ignore revoke errors (might not be in CRL yet)
-        console.warn(`Warning: Could not revoke certificate (might not exist in CRL)`)
+      // Try to revoke if certificate exists
+      if (existsSync(certPath)) {
+        try {
+          execSync(`${EASYRSA_BIN} revoke ${username}`, {
+            cwd: EASYRSA_DIR,
+            env: { ...process.env, EASYRSA_BATCH: '1' },
+            stdio: 'pipe'
+          })
+          console.log(`✓ Certificate revoked in PKI`)
+          
+          // Generate updated CRL after revocation
+          try {
+            execSync(`${EASYRSA_BIN} gen-crl`, {
+              cwd: EASYRSA_DIR,
+              env: { ...process.env, EASYRSA_BATCH: '1' },
+              stdio: 'pipe'
+            })
+            console.log(`✓ CRL updated`)
+          } catch (crlErr) {
+            console.warn(`Warning: Could not update CRL: ${crlErr}`)
+          }
+        } catch (err) {
+          console.warn(`Warning: Could not revoke certificate (might not be in CRL yet)`)
+        }
       }
       
-      // Force remove certificate files
+      // Force remove all certificate-related files
       try {
         execSync(`rm -f "${certPath}" "${keyPath}" "${reqPath}"`, {
           stdio: 'pipe'
@@ -69,6 +84,20 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
         console.log(`✓ Old certificate files removed`)
       } catch (err) {
         console.warn(`Warning: Could not remove old certificate files: ${err}`)
+      }
+      
+      // Also remove from index if exists
+      const indexPath = `${EASYRSA_DIR}/pki/index.txt`
+      if (existsSync(indexPath)) {
+        try {
+          // Remove lines containing this username from index
+          execSync(`sed -i.bak '/CN=${username}$/d' "${indexPath}"`, {
+            stdio: 'pipe'
+          })
+          console.log(`✓ Removed from PKI index`)
+        } catch (err) {
+          console.warn(`Warning: Could not update PKI index: ${err}`)
+        }
       }
     }
 
