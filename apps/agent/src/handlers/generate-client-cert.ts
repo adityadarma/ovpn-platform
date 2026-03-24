@@ -42,19 +42,33 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
     // Check if client certificate already exists
     const certPath = `${EASYRSA_DIR}/pki/issued/${username}.crt`
     const keyPath = `${EASYRSA_DIR}/pki/private/${username}.key`
+    const reqPath = `${EASYRSA_DIR}/pki/reqs/${username}.req`
     
-    // If certificate exists, revoke it first
+    // If certificate exists, revoke and remove it first
     if (existsSync(certPath)) {
-      console.log(`Certificate for ${username} already exists, revoking...`)
+      console.log(`Certificate for ${username} already exists, removing...`)
+      
       try {
+        // Try to revoke first
         execSync(`${EASYRSA_BIN} revoke ${username}`, {
           cwd: EASYRSA_DIR,
           env: { ...process.env, EASYRSA_BATCH: '1' },
           stdio: 'pipe'
         })
+        console.log(`✓ Certificate revoked`)
       } catch (err) {
         // Ignore revoke errors (might not be in CRL yet)
-        console.warn(`Warning: Could not revoke existing certificate: ${err}`)
+        console.warn(`Warning: Could not revoke certificate (might not exist in CRL)`)
+      }
+      
+      // Force remove certificate files
+      try {
+        execSync(`rm -f "${certPath}" "${keyPath}" "${reqPath}"`, {
+          stdio: 'pipe'
+        })
+        console.log(`✓ Old certificate files removed`)
+      } catch (err) {
+        console.warn(`Warning: Could not remove old certificate files: ${err}`)
       }
     }
 
@@ -107,6 +121,16 @@ export async function handleGenerateClientCert(params: Record<string, unknown>, 
     }
   } catch (error: any) {
     console.error(`Failed to generate client certificate for ${username}:`, error.message)
-    throw new Error(`Failed to generate client certificate: ${error.message}`)
+    
+    // Provide more detailed error message
+    let errorMsg = error.message
+    if (error.stderr) {
+      errorMsg += `\nStderr: ${error.stderr.toString()}`
+    }
+    if (error.stdout) {
+      errorMsg += `\nStdout: ${error.stdout.toString()}`
+    }
+    
+    throw new Error(`Failed to generate client certificate: ${errorMsg}`)
   }
 }

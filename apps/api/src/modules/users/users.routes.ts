@@ -96,7 +96,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       onRequest: [app.authenticate],
       schema: {
         tags: ['users'],
-        summary: 'Generate client certificate for user',
+        summary: 'Generate client certificate for user on specific node',
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
@@ -129,27 +129,25 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(400).send({ error: 'Bad Request', message: 'Node not found or offline' })
       }
 
-      // If user has existing certificate, add to revocation list
-      if (user.client_cert) {
+      // Check if certificate already exists for this user-node combination
+      const existingCert = await app.db('user_node_certificates')
+        .where({ user_id: id, node_id: nodeId })
+        .first()
+
+      // If exists and not revoked, add to revocation list
+      if (existingCert && !existingCert.is_revoked && existingCert.client_cert) {
         try {
-          // Verify node exists before inserting
-          const nodeExists = await app.db('vpn_nodes').where({ id: nodeId }).first()
-          if (nodeExists) {
-            await app.db('cert_revocations').insert({
-              id: crypto.randomUUID(),
-              user_id: id,
-              node_id: nodeId,
-              revoked_cert: user.client_cert,
-              reason: 'Certificate regenerated',
-              revoked_by: authUser.id,
-              revoked_at: new Date()
-            })
-          } else {
-            console.warn(`[revoke-cert] Node ${nodeId} not found, skipping revocation record`)
-          }
+          await app.db('cert_revocations').insert({
+            id: crypto.randomUUID(),
+            user_id: id,
+            node_id: nodeId,
+            revoked_cert: existingCert.client_cert,
+            reason: 'Certificate regenerated',
+            revoked_by: authUser.id,
+            revoked_at: new Date()
+          })
         } catch (err: any) {
           console.error('Failed to add to revocation list:', err.message)
-          // Don't fail the request if revocation logging fails
         }
       }
 
@@ -178,16 +176,37 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         if (task.status === 'done') {
           const result = JSON.parse(task.result || '{}')
           
-          // Save certificate to user record
-          await app.db('users').where({ id }).update({
-            client_cert: result.clientCert,
-            client_key: result.clientKey,
-            cert_password_protected: result.passwordProtected,
-            cert_generated_at: new Date(),
-            cert_expires_at: new Date(result.expiresAt),
-            cert_last_renewed_at: new Date(),
-            cert_renewal_count: app.db.raw('cert_renewal_count + 1')
-          })
+          // Save or update certificate in user_node_certificates table
+          if (existingCert) {
+            await app.db('user_node_certificates')
+              .where({ user_id: id, node_id: nodeId })
+              .update({
+                client_cert: result.clientCert,
+                client_key: result.clientKey,
+                password_protected: result.passwordProtected,
+                generated_at: new Date(),
+                expires_at: result.expiresAt ? new Date(result.expiresAt) : null,
+                is_revoked: false,
+                revoked_at: null,
+                revoked_by: null,
+                revoke_reason: null,
+                updated_at: new Date()
+              })
+          } else {
+            await app.db('user_node_certificates').insert({
+              id: crypto.randomUUID(),
+              user_id: id,
+              node_id: nodeId,
+              client_cert: result.clientCert,
+              client_key: result.clientKey,
+              password_protected: result.passwordProtected,
+              generated_at: new Date(),
+              expires_at: result.expiresAt ? new Date(result.expiresAt) : null,
+              is_revoked: false,
+              created_at: new Date(),
+              updated_at: new Date()
+            })
+          }
 
           return reply.send({
             message: 'Certificate generated successfully',
@@ -380,13 +399,128 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     }
   )
 
+  // GET /api/v1/users/:id/certificates
+  app.get<{ Params: { id: string } }>(
+    '/users/:id/certificates',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        tags: ['users'],
+        summary: 'List all certificates for user across all nodes',
+        security: [{ bearerAuth: [] }]
+      }
+    },
+    async (request, reply) => {
+      const { id } = request.params
+
+      const authUser = request.user as { id: string; role: string }
+      if (authUser.role !== 'admin' && authUser.id !== id) {
+        return reply.status(403).send({ error: 'Forbidden' })
+      }
+
+      const certificates = await app.db('user_node_certificates')
+        .join('vpn_nodes', 'user_node_certificates.node_id', 'vpn_nodes.id')
+        .where('user_node_certificates.user_id', id)
+        .select(
+          'user_node_certificates.id',
+          'user_node_certificates.node_id',
+          'vpn_nodes.hostname as node_hostname',
+          'vpn_nodes.ip_address as node_ip',
+          'vpn_nodes.status as node_status',
+          'user_node_certificates.password_protected',
+          'user_node_certificates.generated_at',
+          'user_node_certificates.expires_at',
+          'user_node_certificates.last_downloaded_at',
+          'user_node_certificates.download_count',
+          'user_node_certificates.is_revoked',
+          'user_node_certificates.revoked_at',
+          'user_node_certificates.revoke_reason'
+        )
+        .orderBy('user_node_certificates.generated_at', 'desc')
+
+      return reply.send(certificates)
+    }
+  )
+
+  // POST /api/v1/users/:id/certificates/:certId/revoke
+  app.post<{ Params: { id: string; certId: string }; Body: { reason?: string } }>(
+    '/users/:id/certificates/:certId/revoke',
+    {
+      onRequest: [app.authenticate],
+      schema: {
+        tags: ['users'],
+        summary: 'Revoke a certificate',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          properties: {
+            reason: { type: 'string', description: 'Reason for revocation' }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const { id, certId } = request.params
+      const { reason = 'Manually revoked' } = request.body
+
+      const authUser = request.user as { id: string; role: string }
+      if (authUser.role !== 'admin') {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Only admins can revoke certificates' })
+      }
+
+      const certificate = await app.db('user_node_certificates')
+        .where({ id: certId, user_id: id })
+        .first()
+
+      if (!certificate) {
+        return reply.status(404).send({ error: 'Not Found', message: 'Certificate not found' })
+      }
+
+      if (certificate.is_revoked) {
+        return reply.status(400).send({ error: 'Bad Request', message: 'Certificate already revoked' })
+      }
+
+      // Add to revocation list
+      if (certificate.client_cert) {
+        try {
+          await app.db('cert_revocations').insert({
+            id: crypto.randomUUID(),
+            user_id: id,
+            node_id: certificate.node_id,
+            revoked_cert: certificate.client_cert,
+            reason: reason,
+            revoked_by: authUser.id,
+            revoked_at: new Date()
+          })
+        } catch (err: any) {
+          console.error('Failed to add to revocation list:', err.message)
+        }
+      }
+
+      // Mark as revoked
+      await app.db('user_node_certificates')
+        .where({ id: certId })
+        .update({
+          is_revoked: true,
+          revoked_at: new Date(),
+          revoked_by: authUser.id,
+          revoke_reason: reason,
+          updated_at: new Date()
+        })
+
+      return reply.send({
+        message: 'Certificate revoked successfully'
+      })
+    }
+  )
+
   // GET /api/v1/users/:id/vpn
-  app.get<{ Params: { id: string }; Querystring: { nodeId?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { nodeId?: string; certId?: string } }>(
     '/users/:id/vpn',
     { onRequest: [app.authenticate], schema: { tags: ['users'], summary: 'Download .ovpn config', security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       const { id } = request.params
-      const { nodeId } = request.query
+      const { nodeId, certId } = request.query
 
       const user = await app.db('users').where({ id }).first()
       if (!user) return reply.status(404).send({ error: 'Not Found', message: 'User not found' })
@@ -396,29 +530,69 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(403).send({ error: 'Forbidden' })
       }
 
-      const nodeQuery = app.db('vpn_nodes').where('status', 'online')
-      if (nodeId) nodeQuery.where({ id: nodeId })
-      
-      const node = await nodeQuery.first()
+      // Get certificate - either by certId or by nodeId
+      let certificate
+      if (certId) {
+        certificate = await app.db('user_node_certificates')
+          .where({ id: certId, user_id: id })
+          .first()
+      } else if (nodeId) {
+        certificate = await app.db('user_node_certificates')
+          .where({ user_id: id, node_id: nodeId })
+          .first()
+      } else {
+        // Get any certificate (prefer non-revoked)
+        certificate = await app.db('user_node_certificates')
+          .where({ user_id: id, is_revoked: false })
+          .first()
+        
+        if (!certificate) {
+          certificate = await app.db('user_node_certificates')
+            .where({ user_id: id })
+            .first()
+        }
+      }
 
+      if (!certificate) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'User does not have any certificates. Generate one first via POST /users/:id/generate-cert'
+        })
+      }
+
+      if (certificate.is_revoked) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Certificate is revoked. Generate a new one.'
+        })
+      }
+
+      if (!certificate.client_cert || !certificate.client_key) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Certificate data is incomplete. Generate a new one.'
+        })
+      }
+
+      // Get node
+      const node = await app.db('vpn_nodes').where({ id: certificate.node_id }).first()
       if (!node) {
-        return reply.status(400).send({ error: 'Bad Request', message: 'No online VPN nodes available' })
+        return reply.status(400).send({ error: 'Bad Request', message: 'Node not found' })
       }
 
       if (!node.ca_cert || !node.ta_key) {
         return reply.status(400).send({ error: 'Bad Request', message: 'Node has not uploaded certificates yet (CA cert and TLS key required)' })
       }
 
-      // Check if user has client certificate
-      if (!user.client_cert || !user.client_key) {
-        return reply.status(400).send({
-          error: 'Bad Request',
-          message: 'User does not have a client certificate. Generate one first via POST /users/:id/generate-cert'
-        })
-      }
-
-      // Track download history
+      // Update download tracking
       try {
+        await app.db('user_node_certificates')
+          .where({ id: certificate.id })
+          .update({
+            last_downloaded_at: new Date(),
+            download_count: app.db.raw('download_count + 1')
+          })
+
         await app.db('cert_download_history').insert({
           id: crypto.randomUUID(),
           user_id: id,
@@ -429,12 +603,12 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         })
       } catch (err) {
         // Log but don't fail the download
-        console.error('Failed to track download history:', err)
+        console.error('Failed to track download:', err)
       }
 
       // Get node configuration settings
       const protocol = node.protocol || 'udp'
-      const cipher = node.cipher || 'AES-128-GCM' // Changed default to match server
+      const cipher = node.cipher || 'AES-128-GCM'
       const authDigest = node.auth_digest || 'SHA256'
       
       // Build config with node-specific settings
@@ -471,11 +645,11 @@ ${node.ca_cert.trim()}
 </ca>
 
 <cert>
-${user.client_cert.trim()}
+${certificate.client_cert.trim()}
 </cert>
 
 <key>
-${user.client_key.trim()}
+${certificate.client_key.trim()}
 </key>
 
 <tls-crypt>

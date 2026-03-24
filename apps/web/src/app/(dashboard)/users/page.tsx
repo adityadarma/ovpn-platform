@@ -20,11 +20,15 @@ export default function UsersPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [showCertModal, setShowCertModal] = useState(false)
+  const [showCertListModal, setShowCertListModal] = useState(false)
   const [selectedUserForCert, setSelectedUserForCert] = useState<User | null>(null)
+  const [selectedUserForCertList, setSelectedUserForCertList] = useState<User | null>(null)
   const [certForm, setCertForm] = useState({ nodeId: '', passwordProtected: false, password: '', validDays: 0 })
   const [form, setForm] = useState<CreateUserPayload>({ username: '', email: '', password: '', role: 'user' })
   const [search, setSearch] = useState('')
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
+  const [revokeReason, setRevokeReason] = useState('')
+  const [revokingCertId, setRevokingCertId] = useState<string | null>(null)
 
   const { data: users = [], isLoading } = useQuery<User[]>({
     queryKey: ['users'],
@@ -40,6 +44,12 @@ export default function UsersPage() {
     queryKey: ['expiring-certs'],
     queryFn: () => api.get('/api/v1/users/expiring-certs?days=30'),
     refetchInterval: 60000, // Refresh every minute
+  })
+
+  const { data: userCertificates = [], refetch: refetchCertificates } = useQuery<any[]>({
+    queryKey: ['user-certificates', selectedUserForCertList?.id],
+    queryFn: () => api.get(`/api/v1/users/${selectedUserForCertList?.id}/certificates`),
+    enabled: !!selectedUserForCertList,
   })
 
   const createMutation = useMutation({
@@ -125,6 +135,18 @@ export default function UsersPage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const revokeCertMutation = useMutation({
+    mutationFn: ({ userId, certId, reason }: { userId: string; certId: string; reason: string }) =>
+      api.post(`/api/v1/users/${userId}/certificates/${certId}/revoke`, { reason }),
+    onSuccess: () => {
+      refetchCertificates()
+      setRevokingCertId(null)
+      setRevokeReason('')
+      toast.success('Certificate revoked successfully')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   const handleOpenCertModal = (user: User) => {
     setSelectedUserForCert(user)
     setShowCertModal(true)
@@ -189,12 +211,16 @@ export default function UsersPage() {
 
   const [isDownloading, setIsDownloading] = useState<string | null>(null)
   
-  const handleDownloadConfig = async (user: User) => {
+  const handleDownloadConfig = async (user: User, certId?: string) => {
     try {
-      setIsDownloading(user.id)
+      setIsDownloading(certId || user.id)
       const token = useAuthStore.getState().token
       
-      const res = await fetch(`${API_URL}/api/v1/users/${user.id}/vpn`, {
+      const url = certId 
+        ? `${API_URL}/api/v1/users/${user.id}/vpn?certId=${certId}`
+        : `${API_URL}/api/v1/users/${user.id}/vpn`
+      
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` }
       })
       
@@ -212,21 +238,31 @@ export default function UsersPage() {
       }
       
       const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
+      const url2 = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url
+      a.href = url2
       a.download = filename
       document.body.appendChild(a)
       a.click()
-      window.URL.revokeObjectURL(url)
+      window.URL.revokeObjectURL(url2)
       a.remove()
       
       toast.success('Configuration downloaded successfully')
+      
+      // Refresh certificates list if modal is open
+      if (showCertListModal) {
+        refetchCertificates()
+      }
     } catch (e: any) {
       toast.error(e.message)
     } finally {
       setIsDownloading(null)
     }
+  }
+
+  const handleOpenCertListModal = (user: User) => {
+    setSelectedUserForCertList(user)
+    setShowCertListModal(true)
   }
 
   const filtered = users.filter(u =>
@@ -420,12 +456,11 @@ export default function UsersPage() {
                       <Key className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => handleDownloadConfig(user)}
-                      disabled={isDownloading === user.id}
-                      className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
-                      title="Download config"
+                      onClick={() => handleOpenCertListModal(user)}
+                      className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                      title="View certificates"
                     >
-                      <Download className={`h-4 w-4 ${isDownloading === user.id ? 'animate-pulse' : ''}`} />
+                      <Download className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => { if (confirm('Delete user?')) deleteMutation.mutate(user.id) }}
@@ -688,6 +723,269 @@ export default function UsersPage() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Certificate List Modal */}
+      {showCertListModal && selectedUserForCertList && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <Key className="h-5 w-5 text-emerald-600" />
+                  Certificates for {selectedUserForCertList.username}
+                </h2>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Manage certificates across all nodes
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowCertListModal(false)
+                  setSelectedUserForCertList(null)
+                }} 
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-md"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              {userCertificates.length === 0 ? (
+                <div className="text-center py-12">
+                  <Key className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 font-medium">No certificates found</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Generate a certificate for this user on a node
+                  </p>
+                  <Button
+                    onClick={() => {
+                      setShowCertListModal(false)
+                      handleOpenCertModal(selectedUserForCertList)
+                    }}
+                    className="mt-4 bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Generate Certificate
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {userCertificates.map((cert: any) => (
+                    <div
+                      key={cert.id}
+                      className={`border rounded-lg p-4 ${
+                        cert.is_revoked 
+                          ? 'border-red-200 bg-red-50' 
+                          : cert.node_status === 'online'
+                          ? 'border-emerald-200 bg-emerald-50/30'
+                          : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="font-semibold text-gray-900">
+                              {cert.node_hostname}
+                            </h3>
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              cert.node_status === 'online'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                cert.node_status === 'online' ? 'bg-emerald-500' : 'bg-gray-400'
+                              }`} />
+                              {cert.node_status}
+                            </span>
+                            {cert.is_revoked && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                                <X className="h-3 w-3" />
+                                Revoked
+                              </span>
+                            )}
+                            {cert.password_protected && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700" title="Password protected">
+                                <Lock className="h-3 w-3" />
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                            <div className="text-gray-500">
+                              <span className="font-medium">IP:</span> {cert.node_ip}
+                            </div>
+                            <div className="text-gray-500" suppressHydrationWarning>
+                              <span className="font-medium">Generated:</span>{' '}
+                              {cert.generated_at ? new Date(cert.generated_at).toLocaleDateString() : 'N/A'}
+                            </div>
+                            <div className="text-gray-500" suppressHydrationWarning>
+                              <span className="font-medium">Expires:</span>{' '}
+                              {cert.expires_at ? (
+                                <>
+                                  {new Date(cert.expires_at).toLocaleDateString()}
+                                  {(() => {
+                                    const days = Math.floor((new Date(cert.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                                    if (days < 0) {
+                                      return <span className="text-red-600 ml-1">(Expired)</span>
+                                    } else if (days < 30) {
+                                      return <span className="text-amber-600 ml-1">({days} days left)</span>
+                                    }
+                                    return null
+                                  })()}
+                                </>
+                              ) : (
+                                <span className="text-emerald-600">Never</span>
+                              )}
+                            </div>
+                            <div className="text-gray-500">
+                              <span className="font-medium">Downloads:</span> {cert.download_count}
+                            </div>
+                          </div>
+
+                          {cert.is_revoked && cert.revoke_reason && (
+                            <div className="mt-2 text-sm text-red-700 bg-red-100 rounded px-2 py-1">
+                              <span className="font-medium">Reason:</span> {cert.revoke_reason}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {!cert.is_revoked ? (
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() => handleDownloadConfig(selectedUserForCertList, cert.id)}
+                                disabled={isDownloading === cert.id}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                <Download className={`mr-2 h-4 w-4 ${isDownloading === cert.id ? 'animate-pulse' : ''}`} />
+                                Download
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setRevokingCertId(cert.id)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Revoke
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setShowCertListModal(false)
+                                handleOpenCertModal(selectedUserForCertList)
+                                setCertForm(prev => ({ ...prev, nodeId: cert.node_id }))
+                              }}
+                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Regenerate
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-gray-100 p-5 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-500">
+                  {userCertificates.filter((c: any) => !c.is_revoked).length} active certificate(s)
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowCertListModal(false)
+                      setSelectedUserForCertList(null)
+                    }}
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setShowCertListModal(false)
+                      handleOpenCertModal(selectedUserForCertList)
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Generate New
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Revoke Certificate Confirmation Modal */}
+      {revokingCertId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="p-5 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                Revoke Certificate
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                This action cannot be undone. The user will not be able to connect with this certificate.
+              </p>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Reason for revocation <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={revokeReason}
+                  onChange={(e) => setRevokeReason(e.target.value)}
+                  placeholder="e.g., Security breach, Lost device, User terminated..."
+                  required
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+                />
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setRevokingCertId(null)
+                    setRevokeReason('')
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (!revokeReason.trim()) {
+                      toast.error('Please provide a reason for revocation')
+                      return
+                    }
+                    if (selectedUserForCertList) {
+                      revokeCertMutation.mutate({
+                        userId: selectedUserForCertList.id,
+                        certId: revokingCertId,
+                        reason: revokeReason
+                      })
+                    }
+                  }}
+                  disabled={revokeCertMutation.isPending}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                >
+                  {revokeCertMutation.isPending ? 'Revoking...' : 'Revoke Certificate'}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
