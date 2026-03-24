@@ -2,13 +2,12 @@ import type { Knex } from 'knex'
 
 export async function up(knex: Knex): Promise<void> {
   await knex.schema.createTable('users', (table) => {
-    table.uuid('id').primary().defaultTo(knex.fn.uuid())
+    table.string('id', 36).primary().notNullable()
     table.string('username', 64).notNullable().unique()
     table.string('email', 255).nullable()
     table.string('password', 255).notNullable()
     table.enu('role', ['admin', 'user']).notNullable().defaultTo('user')
     table.boolean('is_active').notNullable().defaultTo(true)
-    table.string('static_vpn_ip', 15).nullable()
     table.timestamp('valid_from').nullable()
     table.timestamp('valid_to').nullable()
     table.timestamp('last_login').nullable()

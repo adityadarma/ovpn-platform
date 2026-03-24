@@ -177,7 +177,6 @@ const vpnRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(201).send({
         session_id: sessionId,
         push_routes: networks.map((n: { allowed_network: string }) => n.allowed_network),
-        static_ip: user.static_vpn_ip ?? null,
       })
     },
   )
