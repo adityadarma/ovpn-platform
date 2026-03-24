@@ -295,7 +295,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         nodeData.vpn_netmask = config.vpn_netmask || '255.255.255.0'
         nodeData.dns_servers = config.dns_servers || '8.8.8.8,1.1.1.1'
         nodeData.push_routes = config.push_routes || ''
-        nodeData.cipher = config.cipher || 'AES-256-GCM'
+        nodeData.cipher = config.cipher || 'AES-128-GCM'
         nodeData.auth_digest = config.auth_digest || 'SHA256'
         nodeData.compression = config.compression || 'lz4-v2'
         nodeData.keepalive_ping = config.keepalive_ping || 10
@@ -309,7 +309,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         nodeData.vpn_netmask = '255.255.255.0'
         nodeData.dns_servers = '8.8.8.8,1.1.1.1'
         nodeData.push_routes = ''
-        nodeData.cipher = 'AES-256-GCM'
+        nodeData.cipher = 'AES-128-GCM'
         nodeData.auth_digest = 'SHA256'
         nodeData.compression = 'lz4-v2'
         nodeData.keepalive_ping = 10
@@ -343,21 +343,38 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
       if (taKey) updates.ta_key = taKey
       await app.db('vpn_nodes').where({ id: nodeId }).update(updates)
       
-      // If node was offline and now online, trigger certificate sync
-      if (wasOffline && (!currentNode?.ca_cert || !currentNode?.ta_key)) {
-        app.log.info(`Node ${nodeId} came online without certificates, creating sync task`)
+      // If node was offline and now online, trigger syncs
+      if (wasOffline) {
+        const tasksToCreate = []
         
-        const taskId = crypto.randomUUID()
-        await app.db('tasks').insert({
-          id: taskId,
+        // Sync certificates if missing
+        if (!currentNode?.ca_cert || !currentNode?.ta_key) {
+          app.log.info(`Node ${nodeId} came online without certificates, creating sync task`)
+          tasksToCreate.push({
+            id: crypto.randomUUID(),
+            node_id: nodeId,
+            action: 'sync_certificates',
+            payload: JSON.stringify({}),
+            status: 'pending',
+            created_at: new Date(),
+          })
+        }
+        
+        // Always sync server config on first connection to ensure database matches actual config
+        app.log.info(`Node ${nodeId} came online, creating config sync task`)
+        tasksToCreate.push({
+          id: crypto.randomUUID(),
           node_id: nodeId,
-          action: 'sync_certificates',
+          action: 'sync_server_config',
           payload: JSON.stringify({}),
           status: 'pending',
           created_at: new Date(),
         })
         
-        return { ok: true, sync_requested: true, task_id: taskId }
+        if (tasksToCreate.length > 0) {
+          await app.db('tasks').insert(tasksToCreate)
+          return { ok: true, sync_requested: true, tasks_created: tasksToCreate.length }
+        }
       }
       
       return { ok: true }
@@ -483,6 +500,90 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(500).send({ 
           error: 'Internal Server Error', 
           message: 'Failed to sync certificates' 
+        })
+      }
+    },
+  )
+
+  // POST /api/v1/nodes/sync-config (called by agent to sync server config)
+  app.post<{ Body: { port: number; protocol: string; cipher: string; auth: string; vpnNetwork: string; vpnNetmask: string; dnsServers: string; pushRoutes: string; compression: string; keepalivePing: number; keepaliveTimeout: number; maxClients: number; tunnelMode: string } }>(
+    '/nodes/sync-config',
+    {
+      schema: {
+        tags: ['nodes'],
+        summary: 'Sync node server configuration',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['port', 'protocol', 'cipher', 'auth', 'vpnNetwork', 'vpnNetmask'],
+          properties: {
+            port: { type: 'number', description: 'VPN server port' },
+            protocol: { type: 'string', description: 'Protocol (udp/tcp)' },
+            cipher: { type: 'string', description: 'Encryption cipher' },
+            auth: { type: 'string', description: 'Auth digest' },
+            vpnNetwork: { type: 'string', description: 'VPN network address' },
+            vpnNetmask: { type: 'string', description: 'VPN netmask' },
+            dnsServers: { type: 'string', description: 'DNS servers (comma-separated)' },
+            pushRoutes: { type: 'string', description: 'Push routes (comma-separated)' },
+            compression: { type: 'string', description: 'Compression algorithm' },
+            keepalivePing: { type: 'number', description: 'Keepalive ping interval' },
+            keepaliveTimeout: { type: 'number', description: 'Keepalive timeout' },
+            maxClients: { type: 'number', description: 'Maximum clients' },
+            tunnelMode: { type: 'string', description: 'Tunnel mode (full/split)' }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      // Extract node token from Authorization header
+      const authHeader = request.headers.authorization
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Node token required' })
+      }
+
+      const token = authHeader.substring(7)
+      
+      // Find node by token
+      const node = await app.db('vpn_nodes').where({ token }).first()
+      if (!node) {
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid node token' })
+      }
+
+      const config = request.body
+
+      try {
+        // Update node configuration
+        await app.db('vpn_nodes')
+          .where({ id: node.id })
+          .update({
+            port: config.port,
+            protocol: config.protocol,
+            cipher: config.cipher,
+            auth_digest: config.auth,
+            vpn_network: config.vpnNetwork,
+            vpn_netmask: config.vpnNetmask,
+            dns_servers: config.dnsServers,
+            push_routes: config.pushRoutes,
+            compression: config.compression,
+            keepalive_ping: config.keepalivePing,
+            keepalive_timeout: config.keepaliveTimeout,
+            max_clients: config.maxClients,
+            tunnel_mode: config.tunnelMode,
+            last_seen: new Date()
+          })
+
+        app.log.info(`Server config synced for node ${node.id}`)
+
+        return reply.send({
+          success: true,
+          message: 'Server config synced successfully',
+          node_id: node.id
+        })
+      } catch (error: any) {
+        app.log.error(`Failed to sync config for node ${node.id}:`, error)
+        return reply.status(500).send({
+          error: 'Internal Server Error',
+          message: 'Failed to sync server config'
         })
       }
     },

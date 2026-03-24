@@ -11,6 +11,7 @@ export type TaskAction =
   | 'apply_network_policy'
   | 'update_server_config'
   | 'sync_certificates'
+  | 'sync_server_config'
 
 export interface Task {
   id: string

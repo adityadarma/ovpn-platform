@@ -11,6 +11,7 @@ import { startPoller } from './core/poller'
 import { startHeartbeat } from './core/heartbeat'
 import { OpenVpnManagementDriver, WireGuardDriver, type VpnDriver } from './drivers'
 import { handleSyncCertificates } from './handlers/sync-certificates'
+import { handleSyncServerConfig } from './handlers/sync-server-config'
 
 /**
  * Create VPN driver based on configuration
@@ -81,6 +82,21 @@ async function syncCertificatesOnStartup(driver: VpnDriver): Promise<void> {
   }
 }
 
+/**
+ * Sync server config on startup
+ */
+async function syncServerConfigOnStartup(driver: VpnDriver): Promise<void> {
+  console.log('[startup] Syncing server configuration...')
+  
+  try {
+    await handleSyncServerConfig({}, driver)
+    console.log('[startup] ✓ Server config synced successfully')
+  } catch (error) {
+    console.error('[startup] ✗ Failed to sync server config:', (error as Error).message)
+    console.warn('[startup] Server config will be synced via task queue')
+  }
+}
+
 async function main() {
   const env = loadAgentEnv()
 
@@ -111,6 +127,9 @@ async function main() {
 
   // Sync certificates on startup if needed
   await syncCertificatesOnStartup(driver)
+
+  // Sync server config on startup
+  await syncServerConfigOnStartup(driver)
 
   // Start services
   startHeartbeat(env, driver)

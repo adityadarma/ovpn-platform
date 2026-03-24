@@ -434,12 +434,17 @@ const userRoutes: FastifyPluginAsync = async (app) => {
 
       // Get node configuration settings
       const protocol = node.protocol || 'udp'
-      const cipher = node.cipher || 'AES-256-GCM'
+      const cipher = node.cipher || 'AES-128-GCM' // Changed default to match server
       const authDigest = node.auth_digest || 'SHA256'
-      const compression = node.compression || 'lz4-v2'
       
       // Build config with node-specific settings
       const protoClient = protocol === 'tcp' ? 'tcp-client' : protocol
+      
+      // Determine TLS cipher based on server cipher
+      let tlsCipher = 'TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256'
+      if (cipher.includes('256')) {
+        tlsCipher = 'TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384'
+      }
       
       let config = `client
 proto ${protoClient}
@@ -456,7 +461,7 @@ auth-nocache
 cipher ${cipher}
 tls-client
 tls-version-min 1.2
-tls-cipher TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256
+tls-cipher ${tlsCipher}
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns
 verb 3
