@@ -11,7 +11,7 @@ export async function up(knex: Knex): Promise<void> {
     table.string('serial_number', 100).nullable().comment('Certificate serial number')
     table.string('reason', 100).nullable().comment('Revocation reason')
     table.string('revoked_by', 36).nullable()
-    table.foreign('revoked_by').references('id').inTable('users').comment('Admin who revoked')
+    table.foreign('revoked_by').references('id').inTable('users')
     table.timestamp('revoked_at').notNullable().defaultTo(knex.fn.now())
     table.timestamps(true, true)
     
