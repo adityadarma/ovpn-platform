@@ -1,8 +1,10 @@
 import type { Knex } from 'knex'
+import { randomUUID } from 'crypto'
 
 interface RenewalResult {
   userId: string
   username: string
+  nodeId: string
   success: boolean
   error?: string
 }
@@ -11,112 +13,63 @@ export async function checkAndRenewCertificates(db: Knex): Promise<RenewalResult
   const results: RenewalResult[] = []
 
   try {
-    // Find users with auto-renewal enabled and certificates expiring soon
-    // Database-agnostic date calculation
-    const dbClient = db.client.config.client
-    const now = new Date().toISOString()
+    // Find certificates expiring soon (within 30 days)
+    const now = new Date()
+    const thirtyDaysFromNow = new Date()
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30)
     
-    let query = db('users')
-      .where('cert_auto_renew', true)
-      .whereNotNull('cert_expires_at')
-      .where('cert_expires_at', '>', now)
-    
-    // Add database-specific date comparison
-    if (dbClient === 'sqlite3' || dbClient === 'better-sqlite3') {
-      // SQLite: datetime('now', '+X days')
-      query = query.whereRaw(`datetime(cert_expires_at) <= datetime('now', '+' || CAST(cert_renew_days_before AS TEXT) || ' days')`)
-    } else if (dbClient === 'mysql' || dbClient === 'mysql2') {
-      // MySQL/MariaDB: DATE_ADD(NOW(), INTERVAL X DAY)
-      query = query.whereRaw(`cert_expires_at <= DATE_ADD(NOW(), INTERVAL cert_renew_days_before DAY)`)
-    } else if (dbClient === 'pg') {
-      // PostgreSQL: NOW() + INTERVAL 'X days'
-      query = query.whereRaw(`cert_expires_at <= NOW() + (cert_renew_days_before || ' days')::INTERVAL`)
-    } else {
-      // Fallback: manual calculation in JavaScript
-      console.warn(`[cert-renewal] Unknown database client: ${dbClient}, using fallback method`)
-    }
-    
-    let usersToRenew = await query.select('id', 'username', 'cert_expires_at', 'cert_renew_days_before', 'cert_password_protected')
-    
-    // If using fallback method, filter in JavaScript
-    if (dbClient !== 'sqlite3' && dbClient !== 'better-sqlite3' && dbClient !== 'mysql' && dbClient !== 'mysql2' && dbClient !== 'pg') {
-      usersToRenew = usersToRenew.filter(user => {
-        const expiresAt = new Date(user.cert_expires_at)
-        const renewBefore = new Date()
-        renewBefore.setDate(renewBefore.getDate() + (user.cert_renew_days_before || 30))
-        return expiresAt <= renewBefore
-      })
-    }
+    const expiringCerts = await db('user_node_certificates')
+      .join('users', 'user_node_certificates.user_id', 'users.id')
+      .join('vpn_nodes', 'user_node_certificates.node_id', 'vpn_nodes.id')
+      .where('user_node_certificates.is_revoked', false)
+      .whereNotNull('user_node_certificates.expires_at')
+      .where('user_node_certificates.expires_at', '>', now.toISOString())
+      .where('user_node_certificates.expires_at', '<=', thirtyDaysFromNow.toISOString())
+      .where('vpn_nodes.status', 'online')
+      .select(
+        'user_node_certificates.id as cert_id',
+        'user_node_certificates.user_id',
+        'user_node_certificates.node_id',
+        'user_node_certificates.expires_at',
+        'user_node_certificates.password_protected',
+        'users.username',
+        'vpn_nodes.hostname as node_hostname'
+      )
 
-    console.log(`[cert-renewal] Found ${usersToRenew.length} users needing certificate renewal`)
+    console.log(`[cert-renewal] Found ${expiringCerts.length} certificates expiring within 30 days`)
 
-    for (const user of usersToRenew) {
+    for (const cert of expiringCerts) {
       try {
-        // Find the node where user's certificate was generated
-        // We'll use the most recent download history to determine the node
-        const lastDownload = await db('cert_download_history')
-          .where('user_id', user.id)
-          .orderBy('downloaded_at', 'desc')
-          .first()
-
-        let nodeId = lastDownload?.node_id
-
-        // If no download history, find any online node
-        if (!nodeId) {
-          const onlineNode = await db('vpn_nodes')
-            .where('status', 'online')
-            .first()
-          
-          if (!onlineNode) {
-            results.push({
-              userId: user.id,
-              username: user.username,
-              success: false,
-              error: 'No online nodes available'
-            })
-            continue
-          }
-          
-          nodeId = onlineNode.id
-        }
-
-        // Revoke old certificate
-        const oldCert = await db('users')
-          .where('id', user.id)
+        // Add old certificate to revocation list
+        const oldCertData = await db('user_node_certificates')
+          .where('id', cert.cert_id)
           .select('client_cert')
           .first()
 
-        if (oldCert?.client_cert) {
+        if (oldCertData?.client_cert) {
           try {
-            // Verify node exists before inserting
-            const nodeExists = await db('vpn_nodes').where({ id: nodeId }).first()
-            if (nodeExists) {
-              await db('cert_revocations').insert({
-                id: crypto.randomUUID(),
-                user_id: user.id,
-                node_id: nodeId,
-                revoked_cert: oldCert.client_cert,
-                reason: 'Auto-renewal',
-                revoked_by: null, // System renewal
-                revoked_at: new Date()
-              })
-            } else {
-              console.warn(`[cert-renewal] Node ${nodeId} not found, skipping revocation record for user ${user.username}`)
-            }
+            await db('cert_revocations').insert({
+              id: randomUUID(),
+              user_id: cert.user_id,
+              node_id: cert.node_id,
+              revoked_cert: oldCertData.client_cert,
+              reason: 'Auto-renewal (expiring soon)',
+              revoked_by: null, // System renewal
+              revoked_at: new Date()
+            })
           } catch (err: any) {
-            console.error(`[cert-renewal] Failed to add revocation for user ${user.username}:`, err.message)
-            // Continue with renewal even if revocation logging fails
+            console.error(`[cert-renewal] Failed to add revocation for ${cert.username}:`, err.message)
           }
         }
 
         // Create renewal task
-        const taskId = crypto.randomUUID()
+        const taskId = randomUUID()
         await db('tasks').insert({
           id: taskId,
-          node_id: nodeId,
+          node_id: cert.node_id,
           action: 'generate_client_cert',
           payload: JSON.stringify({
-            username: user.username,
+            username: cert.username,
             password: undefined, // Don't change password on renewal
             validDays: 3650 // Default 10 years
           }),
@@ -132,33 +85,39 @@ export async function checkAndRenewCertificates(db: Knex): Promise<RenewalResult
         while (Date.now() - startTime < maxWait) {
           const task = await db('tasks').where({ id: taskId }).first()
           
-          if (task.status === 'success') {
+          if (task.status === 'done') {
             const result = JSON.parse(task.result || '{}')
             
-            await db('users').where({ id: user.id }).update({
-              client_cert: result.clientCert,
-              client_key: result.clientKey,
-              cert_generated_at: new Date(),
-              cert_expires_at: new Date(result.expiresAt),
-              cert_last_renewed_at: new Date(),
-              cert_renewal_count: db.raw('cert_renewal_count + 1')
-            })
+            // Update certificate in user_node_certificates table
+            await db('user_node_certificates')
+              .where('id', cert.cert_id)
+              .update({
+                client_cert: result.clientCert,
+                client_key: result.clientKey,
+                password_protected: result.passwordProtected,
+                generated_at: new Date(),
+                expires_at: result.expiresAt ? new Date(result.expiresAt) : null,
+                is_revoked: false,
+                updated_at: new Date()
+              })
 
             renewed = true
             results.push({
-              userId: user.id,
-              username: user.username,
+              userId: cert.user_id,
+              username: cert.username,
+              nodeId: cert.node_id,
               success: true
             })
             
-            console.log(`[cert-renewal] Successfully renewed certificate for ${user.username}`)
+            console.log(`[cert-renewal] Successfully renewed certificate for ${cert.username} on ${cert.node_hostname}`)
             break
           }
           
           if (task.status === 'failed') {
             results.push({
-              userId: user.id,
-              username: user.username,
+              userId: cert.user_id,
+              username: cert.username,
+              nodeId: cert.node_id,
               success: false,
               error: task.error_message || 'Task failed'
             })
@@ -168,22 +127,24 @@ export async function checkAndRenewCertificates(db: Knex): Promise<RenewalResult
           await new Promise(resolve => setTimeout(resolve, 1000))
         }
 
-        if (!renewed && !results.find(r => r.userId === user.id)) {
+        if (!renewed && !results.find(r => r.userId === cert.user_id && r.nodeId === cert.node_id)) {
           results.push({
-            userId: user.id,
-            username: user.username,
+            userId: cert.user_id,
+            username: cert.username,
+            nodeId: cert.node_id,
             success: false,
             error: 'Renewal timeout'
           })
         }
       } catch (error: any) {
         results.push({
-          userId: user.id,
-          username: user.username,
+          userId: cert.user_id,
+          username: cert.username,
+          nodeId: cert.node_id,
           success: false,
           error: error.message
         })
-        console.error(`[cert-renewal] Failed to renew certificate for ${user.username}:`, error)
+        console.error(`[cert-renewal] Failed to renew certificate for ${cert.username}:`, error)
       }
     }
   } catch (error) {

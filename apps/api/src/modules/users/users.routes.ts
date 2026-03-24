@@ -374,7 +374,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       onRequest: [app.authenticate],
       schema: {
         tags: ['users'],
-        summary: 'Get users with expiring certificates',
+        summary: 'Get certificates expiring soon',
         security: [{ bearerAuth: [] }],
         querystring: {
           type: 'object',
@@ -389,13 +389,25 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       const expiryDate = new Date()
       expiryDate.setDate(expiryDate.getDate() + days)
 
-      const users = await app.db('users')
-        .whereNotNull('cert_expires_at')
-        .where('cert_expires_at', '<=', expiryDate)
-        .where('cert_expires_at', '>', new Date())
-        .select('id', 'username', 'email', 'cert_expires_at', 'cert_auto_renew')
+      const certificates = await app.db('user_node_certificates')
+        .join('users', 'user_node_certificates.user_id', 'users.id')
+        .join('vpn_nodes', 'user_node_certificates.node_id', 'vpn_nodes.id')
+        .whereNotNull('user_node_certificates.expires_at')
+        .where('user_node_certificates.expires_at', '<=', expiryDate)
+        .where('user_node_certificates.expires_at', '>', new Date())
+        .where('user_node_certificates.is_revoked', false)
+        .select(
+          'user_node_certificates.id as cert_id',
+          'users.id as user_id',
+          'users.username',
+          'users.email',
+          'vpn_nodes.id as node_id',
+          'vpn_nodes.hostname as node_hostname',
+          'user_node_certificates.expires_at',
+          'user_node_certificates.password_protected'
+        )
 
-      return reply.send(users)
+      return reply.send(certificates)
     }
   )
 
