@@ -12,7 +12,7 @@ export async function up(knex: Knex): Promise<void> {
     table.text('change_summary').nullable().comment('Summary of changes')
     table.timestamps(true, true)
     
-    table.index(['node_id', 'changed_at'])
+    table.index(['node_id', 'changed_by', 'created_at'])
   })
 }
 
