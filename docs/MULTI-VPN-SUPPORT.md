@@ -478,6 +478,3 @@ sudo wg-quick up wg0
 - [ ] Driver plugin system
 
 ---
-
-**Last Updated**: 2026-03-22
-**Version**: 2.0.0

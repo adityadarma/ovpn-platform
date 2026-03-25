@@ -25,6 +25,8 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
   private pendingCommands: Map<string, { resolve: (value: string) => void; reject: (error: Error) => void }> = new Map()
   private commandQueue: Array<{ command: string; resolve: (value: string) => void; reject: (error: Error) => void }> = []
   private isProcessing = false
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 10
 
   constructor(
     private socketPath: string = '/run/openvpn/server.sock',
@@ -43,6 +45,9 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
 
       this.socket.on('connect', async () => {
         console.log(`[openvpn-driver] Connected to Unix socket: ${this.socketPath}`)
+        
+        // Reset reconnect attempts on successful connection
+        this.reconnectAttempts = 0
         
         // Enable realtime event notifications
         try {
@@ -77,15 +82,28 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
         this.connected = false
         this.emit('disconnected')
         
-        // Auto-reconnect
-        setTimeout(() => {
-          if (!this.connected) {
-            console.log('[openvpn-driver] Attempting to reconnect...')
-            this.connect().catch((err) => {
-              console.error('[openvpn-driver] Reconnect failed:', err.message)
-            })
-          }
-        }, this.reconnectInterval)
+        // Auto-reconnect with exponential backoff
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          const backoffDelay = Math.min(
+            this.reconnectInterval * Math.pow(1.5, this.reconnectAttempts),
+            30000 // Max 30 seconds
+          )
+          
+          this.reconnectAttempts++
+          
+          console.log(`[openvpn-driver] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${Math.round(backoffDelay/1000)}s...`)
+          
+          setTimeout(() => {
+            if (!this.connected) {
+              this.connect().catch((err) => {
+                console.error('[openvpn-driver] Reconnect failed:', err.message)
+              })
+            }
+          }, backoffDelay)
+        } else {
+          console.error('[openvpn-driver] Max reconnect attempts reached. Giving up.')
+          this.emit('error', new Error('Max reconnect attempts reached'))
+        }
       })
 
       // Connect to Unix socket

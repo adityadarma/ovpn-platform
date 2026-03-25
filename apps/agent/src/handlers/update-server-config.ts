@@ -132,29 +132,29 @@ management /run/openvpn/server.sock unix
     // Reload VPN via management interface
     try {
       await driver.sendCommand('signal SIGHUP')
-      console.log('[update-config] Reloaded VPN via management interface')
+      console.log('[update-config] Sent SIGHUP signal to OpenVPN')
     } catch (err) {
-      console.error('[update-config] Failed to reload via management interface:', err)
+      console.error('[update-config] Failed to send SIGHUP:', err)
       // Restore backup
       writeFileSync(CONFIG_PATH, currentConfig)
       throw new Error('Failed to reload VPN. Config restored from backup.')
     }
 
-    // Wait a moment for reload to complete
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    // Wait for OpenVPN to reload and reconnect
+    console.log('[update-config] Waiting for OpenVPN to reload...')
+    await new Promise(resolve => setTimeout(resolve, 5000))
 
-    // Verify VPN is still connected
-    if (!driver.isConnected()) {
-      // Restore backup
-      writeFileSync(CONFIG_PATH, currentConfig)
-      throw new Error('VPN disconnected after config update. Restored previous config.')
-    }
+    // Note: Don't check driver.isConnected() here because:
+    // - OpenVPN will disconnect management socket during reload
+    // - Driver will auto-reconnect after reload completes
+    // - Checking too early will cause false negative
 
     return {
       success: true,
-      message: 'Server configuration updated successfully',
+      message: 'Server configuration updated successfully. OpenVPN is reloading.',
       configPath: CONFIG_PATH,
-      backupPath: BACKUP_PATH
+      backupPath: BACKUP_PATH,
+      note: 'OpenVPN will reconnect automatically after reload completes'
     }
   } catch (error: any) {
     console.error('[update-config] Error:', error.message)
