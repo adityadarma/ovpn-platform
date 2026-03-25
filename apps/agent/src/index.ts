@@ -12,6 +12,7 @@ import { startHeartbeat } from './core/heartbeat'
 import { OpenVpnManagementDriver, WireGuardDriver, type VpnDriver } from './drivers'
 import { handleSyncCertificates } from './handlers/sync-certificates'
 import { handleSyncServerConfig } from './handlers/sync-server-config'
+import { startEventMonitor } from './services/event-monitor'
 
 /**
  * Create VPN driver based on configuration
@@ -19,11 +20,7 @@ import { handleSyncServerConfig } from './handlers/sync-server-config'
 function createVpnDriver(env: ReturnType<typeof loadAgentEnv>): VpnDriver {
   switch (env.VPN_TYPE) {
     case 'openvpn':
-      return new OpenVpnManagementDriver(
-        env.VPN_MANAGEMENT_HOST,
-        env.VPN_MANAGEMENT_PORT,
-        env.VPN_MANAGEMENT_PASSWORD,
-      )
+      return new OpenVpnManagementDriver(env.OPENVPN_SOCKET_PATH)
     
     case 'wireguard':
       return new WireGuardDriver(env.WIREGUARD_INTERFACE)
@@ -108,7 +105,7 @@ async function main() {
   console.log(`   Heartbeat: every ${env.AGENT_HEARTBEAT_INTERVAL_MS}ms`)
   
   if (env.VPN_TYPE === 'openvpn') {
-    console.log(`   VPN Mgmt: ${env.VPN_MANAGEMENT_HOST}:${env.VPN_MANAGEMENT_PORT}`)
+    console.log(`   VPN Socket: ${env.OPENVPN_SOCKET_PATH}`)
   } else if (env.VPN_TYPE === 'wireguard') {
     console.log(`   WG Interface: ${env.WIREGUARD_INTERFACE}`)
   }
@@ -134,6 +131,11 @@ async function main() {
   // Start services
   startHeartbeat(env, driver)
   startPoller(env, driver)
+  
+  // Start event monitor for realtime VPN events (OpenVPN only)
+  if (env.VPN_TYPE === 'openvpn') {
+    startEventMonitor(env, driver)
+  }
 
   // Graceful shutdown
   const shutdown = async () => {

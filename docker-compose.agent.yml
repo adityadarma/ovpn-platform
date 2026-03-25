@@ -5,7 +5,7 @@
 # 
 # Prerequisites:
 #   1. VPN server must be installed and running on the host
-#   2. VPN server must have management interface enabled (port 7505)
+#   2. VPN server must have management interface enabled
 #   3. Node must be registered in Manager Web UI
 #   4. .env file must be configured with credentials
 #
@@ -14,7 +14,6 @@
 #
 # Network Mode:
 #   Uses 'host' network mode because:
-#   - Agent needs to connect to VPN management interface on host (127.0.0.1:7505)
 #   - Agent needs to connect to Manager API on external server
 #   - No network isolation needed for standalone agent
 #
@@ -39,16 +38,15 @@ services:
       AGENT_POLL_INTERVAL_MS: ${AGENT_POLL_INTERVAL_MS:-5000}
       AGENT_HEARTBEAT_INTERVAL_MS: ${AGENT_HEARTBEAT_INTERVAL_MS:-30000}
       
-      # VPN Management Interface Settings
-      VPN_MANAGEMENT_HOST: ${VPN_MANAGEMENT_HOST:-127.0.0.1}
-      VPN_MANAGEMENT_PORT: ${VPN_MANAGEMENT_PORT:-7505}
-      VPN_MANAGEMENT_PASSWORD: ${VPN_MANAGEMENT_PASSWORD:-}
+      # VPN Management Interface (Unix Socket)
+      OPENVPN_SOCKET_PATH: ${OPENVPN_SOCKET_PATH:-/run/openvpn/server.sock}
     
     # Use host network for direct access to host VPN management interface
     network_mode: host
     
     # Read-only access to VPN certificates
     volumes:
+      - /run/openvpn:/run/openvpn  # Unix socket directory
       - /etc/openvpn/server:/etc/openvpn/server:ro
       - /etc/openvpn/easy-rsa:/etc/openvpn/easy-rsa
     

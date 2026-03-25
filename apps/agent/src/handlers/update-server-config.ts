@@ -96,10 +96,6 @@ persist-tun
 user nobody
 group nogroup
 
-# Management Interface (bind to 0.0.0.0 for Docker access)
-management 0.0.0.0 7505
-management-client-auth
-
 # Logging
 status /var/log/openvpn/status.log
 status-version 3
@@ -108,9 +104,8 @@ verb 3
 
 script-security 2
 
-# VPN Hooks (Certificate-only authentication)
-client-connect /usr/local/bin/vpn-connect
-client-disconnect /usr/local/bin/vpn-disconnect
+# Management Interface
+management /run/openvpn/server.sock unix
 `
 
     // Add custom server config if provided

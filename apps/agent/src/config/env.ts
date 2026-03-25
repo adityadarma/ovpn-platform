@@ -9,13 +9,13 @@ const AgentEnvSchema = z.object({
   AGENT_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().default(30_000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   
+  VPN_TOKEN: z.string().min(1, 'VPN_TOKEN is required for event reporting'),
+  
   // VPN Type Selection
   VPN_TYPE: z.enum(['openvpn', 'wireguard']).default('openvpn'),
   
-  // OpenVPN Management Interface Settings
-  VPN_MANAGEMENT_HOST: z.string().default('127.0.0.1'),
-  VPN_MANAGEMENT_PORT: z.coerce.number().int().default(7505),
-  VPN_MANAGEMENT_PASSWORD: z.string().optional(),
+  // OpenVPN Management Interface (Unix Socket)
+  OPENVPN_SOCKET_PATH: z.string().default('/run/openvpn/server.sock'),
   
   // WireGuard Settings
   WIREGUARD_INTERFACE: z.string().default('wg0'),

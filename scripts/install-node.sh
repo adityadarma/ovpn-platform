@@ -236,9 +236,6 @@ persist-tun
 user nobody
 group nogroup
 
-# Management Interface
-management 0.0.0.0 7505
-management-client-auth
 
 status /var/log/openvpn/status.log
 status-version 3
@@ -246,6 +243,9 @@ log /var/log/openvpn/openvpn.log
 verb 3
 
 script-security 2
+
+# Management Interface
+management /run/openvpn/server.sock unix
 EOF
     
     ok "OpenVPN configuration updated"
@@ -349,9 +349,7 @@ AGENT_NODE_ID=
 AGENT_SECRET_TOKEN=
 AGENT_POLL_INTERVAL_MS=5000
 AGENT_HEARTBEAT_INTERVAL_MS=30000
-VPN_MANAGEMENT_HOST=127.0.0.1
-VPN_MANAGEMENT_PORT=7505
-VPN_MANAGEMENT_PASSWORD=
+OPENVPN_SOCKET_PATH=/run/openvpn/server.sock
 EOF
         
         # Register node
@@ -391,9 +389,7 @@ AGENT_NODE_ID=${ENV_NODE_ID}
 AGENT_SECRET_TOKEN=${ENV_SECRET_TOKEN}
 AGENT_POLL_INTERVAL_MS=5000
 AGENT_HEARTBEAT_INTERVAL_MS=30000
-VPN_MANAGEMENT_HOST=127.0.0.1
-VPN_MANAGEMENT_PORT=7505
-VPN_MANAGEMENT_PASSWORD=
+OPENVPN_SOCKET_PATH=/run/openvpn/server.sock
 EOF
         ok "Configuration saved with provided credentials"
     fi

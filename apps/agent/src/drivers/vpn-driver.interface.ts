@@ -4,7 +4,14 @@
  * Abstraction layer for VPN server communication.
  * Implementations should use the VPN's native management interface
  * (e.g., OpenVPN Management Interface, WireGuard API).
+ * 
+ * Drivers should extend EventEmitter to emit realtime events:
+ * - 'client-connect': When a client connects
+ * - 'client-disconnect': When a client disconnects
+ * - 'client-reauth': When a client reauthenticates
  */
+
+import type { EventEmitter } from 'node:events'
 
 export interface VpnClient {
   commonName: string
@@ -35,7 +42,7 @@ export interface VpnMetrics {
   uptime: number
 }
 
-export interface VpnDriver {
+export interface VpnDriver extends EventEmitter {
   /**
    * Connect to VPN management interface
    */

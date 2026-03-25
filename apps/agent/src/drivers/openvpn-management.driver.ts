@@ -11,7 +11,9 @@ import type {
 /**
  * OpenVPN Management Interface Driver
  * 
- * Communicates with OpenVPN via TCP management interface (default: 127.0.0.1:7505)
+ * Communicates with OpenVPN via Unix socket
+ * 
+ * Unix Socket: /run/openvpn/server.sock
  * 
  * Protocol Reference:
  * - https://openvpn.net/community-resources/management-interface/
@@ -25,9 +27,7 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
   private isProcessing = false
 
   constructor(
-    private host: string = '127.0.0.1',
-    private port: number = 7505,
-    private password?: string,
+    private socketPath: string = '/run/openvpn/server.sock',
     private reconnectInterval: number = 5000,
   ) {
     super()
@@ -42,18 +42,15 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       this.socket = new net.Socket()
 
       this.socket.on('connect', async () => {
-        console.log(`[openvpn-driver] Connected to ${this.host}:${this.port}`)
+        console.log(`[openvpn-driver] Connected to Unix socket: ${this.socketPath}`)
         
-        // Authenticate if password is provided
-        if (this.password) {
-          try {
-            await this.sendCommand(`password ${this.password}`)
-          } catch (err) {
-            console.error('[openvpn-driver] Authentication failed:', err)
-            this.socket?.destroy()
-            reject(err)
-            return
-          }
+        // Enable realtime event notifications
+        try {
+          await this.sendCommand('state on')
+          await this.sendCommand('log on all')
+          console.log('[openvpn-driver] Realtime events enabled')
+        } catch (err) {
+          console.warn('[openvpn-driver] Failed to enable events:', err)
         }
 
         this.connected = true
@@ -76,7 +73,7 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       })
 
       this.socket.on('close', () => {
-        console.log('[openvpn-driver] Connection closed')
+        console.log(`[openvpn-driver] Connection closed (${this.socketPath})`)
         this.connected = false
         this.emit('disconnected')
         
@@ -91,7 +88,9 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
         }, this.reconnectInterval)
       })
 
-      this.socket.connect(this.port, this.host)
+      // Connect to Unix socket
+      console.log(`[openvpn-driver] Connecting to Unix socket: ${this.socketPath}`)
+      this.socket.connect(this.socketPath)
     })
   }
 
@@ -125,6 +124,22 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       return
     }
 
+    // Handle realtime client events
+    if (line.includes('>CLIENT:CONNECT')) {
+      this.handleClientConnect(line)
+      return
+    }
+
+    if (line.includes('>CLIENT:DISCONNECT')) {
+      this.handleClientDisconnect(line)
+      return
+    }
+
+    if (line.includes('>CLIENT:REAUTH')) {
+      this.handleClientReauth(line)
+      return
+    }
+
     // Process command responses
     if (this.commandQueue.length > 0) {
       const current = this.commandQueue[0]
@@ -142,6 +157,72 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
         this.isProcessing = false
         this.processNextCommand()
       }
+    }
+  }
+
+  private handleClientConnect(line: string): void {
+    try {
+      // Format: >CLIENT:CONNECT,{CID},{KID}
+      // Example: >CLIENT:CONNECT,0,1
+      const parts = line.split(',')
+      
+      if (parts.length >= 2) {
+        const clientId = parts[1]
+        const keyId = parts[2] || ''
+        
+        console.log(`[openvpn-driver] Client connecting: CID=${clientId}, KID=${keyId}`)
+        
+        this.emit('client-connect', {
+          clientId,
+          keyId,
+          timestamp: new Date(),
+        })
+      }
+    } catch (err) {
+      console.error('[openvpn-driver] Failed to parse CLIENT:CONNECT:', err)
+    }
+  }
+
+  private handleClientDisconnect(line: string): void {
+    try {
+      // Format: >CLIENT:DISCONNECT,{CID}
+      // Example: >CLIENT:DISCONNECT,0
+      const parts = line.split(',')
+      
+      if (parts.length >= 2) {
+        const clientId = parts[1]
+        
+        console.log(`[openvpn-driver] Client disconnecting: CID=${clientId}`)
+        
+        this.emit('client-disconnect', {
+          clientId,
+          timestamp: new Date(),
+        })
+      }
+    } catch (err) {
+      console.error('[openvpn-driver] Failed to parse CLIENT:DISCONNECT:', err)
+    }
+  }
+
+  private handleClientReauth(line: string): void {
+    try {
+      // Format: >CLIENT:REAUTH,{CID},{KID}
+      const parts = line.split(',')
+      
+      if (parts.length >= 2) {
+        const clientId = parts[1]
+        const keyId = parts[2] || ''
+        
+        console.log(`[openvpn-driver] Client reauthenticating: CID=${clientId}, KID=${keyId}`)
+        
+        this.emit('client-reauth', {
+          clientId,
+          keyId,
+          timestamp: new Date(),
+        })
+      }
+    } catch (err) {
+      console.error('[openvpn-driver] Failed to parse CLIENT:REAUTH:', err)
     }
   }
 
