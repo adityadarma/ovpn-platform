@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
-import { RegisterNodeSchema, HeartbeatSchema } from '@vpn/shared'
+import { HeartbeatSchema } from '@vpn/shared'
 
 interface NodeConfig {
   port: number
@@ -24,6 +24,32 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
     '/nodes',
     { onRequest: [app.authenticate], schema: { tags: ['nodes'], summary: 'List all VPN nodes', security: [{ bearerAuth: [] }] } },
     async () => app.db('vpn_nodes').select('id', 'hostname', 'ip_address', 'port', 'region', 'status', 'version', 'last_seen', 'created_at'),
+  )
+
+  // GET /api/v1/nodes/me (for agent self-check with node token)
+  app.get(
+    '/nodes/me',
+    { schema: { tags: ['nodes'], summary: 'Get current node info (agent auth)', security: [{ bearerAuth: [] }] } },
+    async (request, reply) => {
+      // Extract node token from Authorization header
+      const authHeader = request.headers.authorization
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Node token required' })
+      }
+
+      const token = authHeader.substring(7)
+      
+      // Find node by token
+      const node = await app.db('vpn_nodes').where({ token }).first()
+      
+      if (!node) {
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid node token' })
+      }
+
+      // Return node info without sensitive token
+      const { token: _token, ...safeNode } = node
+      return safeNode
+    },
   )
 
   // GET /api/v1/nodes/:id

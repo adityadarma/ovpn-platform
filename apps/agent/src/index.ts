@@ -35,7 +35,7 @@ function createVpnDriver(env: ReturnType<typeof loadAgentEnv>): VpnDriver {
  */
 async function checkCertificatesSync(env: ReturnType<typeof loadAgentEnv>): Promise<boolean> {
   try {
-    const response = await fetch(`${env.AGENT_MANAGER_URL}/api/v1/nodes/${env.AGENT_NODE_ID}`, {
+    const response = await fetch(`${env.AGENT_MANAGER_URL}/api/v1/nodes/me`, {
       headers: {
         'Authorization': `Bearer ${env.AGENT_SECRET_TOKEN}`,
       },

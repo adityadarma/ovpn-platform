@@ -22,7 +22,6 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
   private socket: net.Socket | null = null
   private connected = false
   private buffer = ''
-  private pendingCommands: Map<string, { resolve: (value: string) => void; reject: (error: Error) => void }> = new Map()
   private commandQueue: Array<{ command: string; resolve: (value: string) => void; reject: (error: Error) => void }> = []
   private isProcessing = false
   private reconnectAttempts = 0
@@ -315,11 +314,8 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
     const clients: VpnClient[] = []
     const lines = statusOutput.split('\n')
 
-    let inClientSection = false
-
     for (const line of lines) {
       if (line.startsWith('CLIENT_LIST')) {
-        inClientSection = true
         const parts = line.split('\t')
         
         if (parts.length >= 8) {
@@ -346,8 +342,6 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
             connectedSince: new Date(parseInt(parts[7], 10) * 1000),
           })
         }
-      } else if (line.startsWith('ROUTING_TABLE') || line.startsWith('GLOBAL_STATS')) {
-        inClientSection = false
       }
     }
 
