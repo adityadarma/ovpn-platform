@@ -46,6 +46,9 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       this.socket.on('connect', async () => {
         console.log(`[openvpn-driver] Connected to Unix socket: ${this.socketPath}`)
         
+        // Set connected BEFORE sending commands
+        this.connected = true
+        
         // Reset reconnect attempts on successful connection
         this.reconnectAttempts = 0
         
@@ -58,7 +61,6 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
           console.warn('[openvpn-driver] Failed to enable events:', err)
         }
 
-        this.connected = true
         this.emit('connected')
         resolve()
       })
