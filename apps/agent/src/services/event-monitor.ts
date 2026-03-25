@@ -179,19 +179,33 @@ async function handleReauth(
  */
 export function startEventMonitor(env: AgentEnv, driver: VpnDriver): void {
   console.log('📡 Event monitor started (realtime VPN events)')
+  console.log(`   VPN Token: ${env.VPN_TOKEN.substring(0, 10)}...`)
+  console.log(`   API URL: ${env.AGENT_MANAGER_URL}/api/v1/vpn/connect`)
   
   // Listen to client connect events
   driver.on('client-connect', (event: ClientConnectEvent) => {
+    console.log('[event-monitor] 🔔 Received client-connect event:', event)
     void handleConnect(env, event, driver)
   })
   
   // Listen to client disconnect events
   driver.on('client-disconnect', (event: ClientDisconnectEvent) => {
+    console.log('[event-monitor] 🔔 Received client-disconnect event:', event)
     void handleDisconnect(env, event, driver)
   })
   
   // Listen to client reauth events
   driver.on('client-reauth', (event: ClientReauthEvent) => {
+    console.log('[event-monitor] 🔔 Received client-reauth event:', event)
     void handleReauth(env, event, driver)
+  })
+  
+  // Debug: Log when driver emits any event
+  driver.on('connected', () => {
+    console.log('[event-monitor] Driver connected')
+  })
+  
+  driver.on('disconnected', () => {
+    console.log('[event-monitor] Driver disconnected')
   })
 }

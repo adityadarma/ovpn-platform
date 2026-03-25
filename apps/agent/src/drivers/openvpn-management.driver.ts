@@ -53,9 +53,18 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
         
         // Enable realtime event notifications
         try {
+          console.log('[openvpn-driver] Enabling realtime events...')
           await this.sendCommand('state on')
+          console.log('[openvpn-driver] ✓ State notifications enabled')
+          
           await this.sendCommand('log on all')
-          console.log('[openvpn-driver] Realtime events enabled')
+          console.log('[openvpn-driver] ✓ Log notifications enabled')
+          
+          // Test: Send status command to verify connection
+          const status = await this.sendCommand('status 3')
+          console.log('[openvpn-driver] ✓ Status command successful')
+          
+          console.log('[openvpn-driver] ✅ Realtime events fully enabled')
         } catch (err) {
           console.warn('[openvpn-driver] Failed to enable events:', err)
         }
@@ -141,6 +150,11 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
     // Skip empty lines and prompts
     if (!line || line === '>' || line.startsWith('>INFO:')) {
       return
+    }
+
+    // Debug: Log all lines that start with >CLIENT:
+    if (line.startsWith('>CLIENT:')) {
+      console.log('[openvpn-driver] 📥 Received event:', line)
     }
 
     // Handle realtime client events
