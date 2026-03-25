@@ -408,56 +408,7 @@ EOF
         info "Check logs: docker logs vpn-agent"
     fi
     
-    # Install VPN hooks
-    install_vpn_hooks
-    
     ok "Agent installation complete"
-}
-
-install_vpn_hooks() {
-    info "Installing VPN hooks..."
-    
-    # Load env
-    [ -f "$INSTALL_DIR/.env" ] && source "$INSTALL_DIR/.env"
-    
-    # vpn-connect hook
-    cat > /usr/local/bin/vpn-connect <<'EOF'
-#!/bin/bash
-[ -f "/opt/vpn-agent/.env" ] && source /opt/vpn-agent/.env
-curl -s -X POST "${AGENT_MANAGER_URL}/api/v1/vpn/connect" \
-    -H "Content-Type: application/json" \
-    -H "X-VPN-Token: ${VPN_TOKEN}" \
-    -d "{\"username\":\"${common_name}\",\"vpn_ip\":\"${ifconfig_pool_remote_ip}\",\"real_ip\":\"${trusted_ip}\",\"node_id\":\"${AGENT_NODE_ID}\"}" > /dev/null 2>&1
-exit 0
-EOF
-    
-    # vpn-disconnect hook
-    cat > /usr/local/bin/vpn-disconnect <<'EOF'
-#!/bin/bash
-[ -f "/opt/vpn-agent/.env" ] && source /opt/vpn-agent/.env
-curl -s -X POST "${AGENT_MANAGER_URL}/api/v1/vpn/disconnect" \
-    -H "Content-Type: application/json" \
-    -H "X-VPN-Token: ${VPN_TOKEN}" \
-    -d "{\"username\":\"${common_name}\",\"vpn_ip\":\"${ifconfig_pool_remote_ip}\",\"bytes_sent\":\"${bytes_sent}\",\"bytes_received\":\"${bytes_received}\",\"duration\":\"${time_duration}\"}" > /dev/null 2>&1
-exit 0
-EOF
-    
-    chmod +x /usr/local/bin/vpn-connect
-    chmod +x /usr/local/bin/vpn-disconnect
-    
-    # Add hooks to OpenVPN config if not present
-    if ! grep -q "client-connect" /etc/openvpn/server/server.conf; then
-        cat >> /etc/openvpn/server/server.conf <<'EOF'
-
-# VPN Hooks
-client-connect /usr/local/bin/vpn-connect
-client-disconnect /usr/local/bin/vpn-disconnect
-EOF
-        systemctl restart openvpn-server@server.service 2>/dev/null || \
-        systemctl restart openvpn@server.service 2>/dev/null
-    fi
-    
-    ok "VPN hooks installed"
 }
 
 # Execute based on mode

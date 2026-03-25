@@ -127,11 +127,6 @@ remove_openvpn() {
             systemctl disable openvpn-iptables.service 2>/dev/null || true
             rm -f /etc/systemd/system/openvpn-iptables.service
             
-            # Remove VPN hooks
-            rm -f /usr/local/bin/vpn-connect
-            rm -f /usr/local/bin/vpn-disconnect
-            rm -rf /opt/vpn-manager/hooks
-            
             systemctl daemon-reload
             
             print_success "OpenVPN removed"
