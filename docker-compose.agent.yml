@@ -44,10 +44,10 @@ services:
     # Use host network for direct access to host VPN management interface
     network_mode: host
     
-    # Read-only access to VPN certificates
+    # Volumes for VPN config and certificates
     volumes:
       - /run/openvpn:/run/openvpn  # Unix socket directory
-      - /etc/openvpn/server:/etc/openvpn/server:ro
+      - /etc/openvpn/server:/etc/openvpn/server
       - /etc/openvpn/easy-rsa:/etc/openvpn/easy-rsa
     
     logging:
