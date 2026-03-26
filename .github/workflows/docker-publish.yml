@@ -184,7 +184,7 @@ jobs:
   
   test-deployment:
     needs: [prepare, build-and-push]
-    if: needs.prepare.outputs.should_build == 'true' && (github.event_name != 'workflow_dispatch' || inputs.push_images == true)
+    if: needs.prepare.outputs.should_build == 'true' && contains(needs.prepare.outputs.images, 'manager') && (github.event_name != 'workflow_dispatch' || inputs.push_images == true)
     runs-on: ubuntu-latest
     
     steps:
@@ -211,29 +211,55 @@ jobs:
           # Add VPN_TOKEN
           echo "VPN_TOKEN=test-vpn-token-for-ci" >> .env
       
+      - name: Pull manager image
+        run: |
+          # Pull the image that was just built
+          docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.MANAGER_IMAGE }}:latest
+          
+          # Tag it for docker-compose
+          docker tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.MANAGER_IMAGE }}:latest ghcr.io/${{ github.repository_owner }}/${{ env.MANAGER_IMAGE }}:latest
+      
       - name: Start manager service
         run: |
-          docker compose pull manager
           docker compose up -d manager
           echo "Waiting for manager to be ready..."
           
-          # Wait for manager to be healthy (max 2 minutes)
-          for i in {1..24}; do
-            if docker compose ps manager | grep -q "healthy"; then
-              echo "Manager is healthy!"
+          # Show container status
+          docker compose ps
+          
+          # Wait for container to start (max 30 seconds)
+          for i in {1..6}; do
+            if docker compose ps manager | grep -q "Up"; then
+              echo "Manager container is up!"
               break
             fi
-            echo "Waiting for manager... ($i/24)"
+            echo "Waiting for container to start... ($i/6)"
+            sleep 5
+          done
+          
+          # Show logs
+          echo "=== Manager Logs (initial) ==="
+          docker compose logs manager
+          
+          # Wait for services to be ready (max 2 minutes)
+          echo "Waiting for services to be ready..."
+          for i in {1..24}; do
+            # Check if API is responding
+            if curl -f http://localhost:3001/api/v1/health 2>/dev/null; then
+              echo "API is ready!"
+              break
+            fi
+            echo "Waiting for API... ($i/24)"
             sleep 5
           done
       
       - name: Check service health
         run: |
           echo "Testing API health endpoint..."
-          curl -f http://localhost:3001/api/v1/health || exit 1
+          curl -v http://localhost:3001/api/v1/health || exit 1
           
           echo "Testing Web UI..."
-          curl -f http://localhost:3000 || exit 1
+          curl -v http://localhost:3000 || exit 1
           
           echo "All services are healthy!"
       
@@ -242,6 +268,12 @@ jobs:
         run: |
           echo "=== Manager Logs ==="
           docker compose logs manager
+          
+          echo "=== Container Status ==="
+          docker compose ps
+          
+          echo "=== Docker Processes ==="
+          docker ps -a
       
       - name: Cleanup
         if: always()

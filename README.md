@@ -293,6 +293,13 @@ docker compose -f docker-compose.dev.yml up
 
 ### Production
 
+**⚠️ Security Checklist:**
+- Generate strong secrets: `openssl rand -base64 32`
+- Protect .env file: `chmod 600 .env`
+- Use HTTPS with reverse proxy (Nginx/Traefik)
+- Configure firewall (allow 22, 80, 443, 1194)
+- Bind ports to localhost: `127.0.0.1:3000:3000`
+
 **Deploy Manager:**
 ```bash
 # Quick install (recommended)
@@ -318,7 +325,7 @@ curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/script
 docker compose -f docker-compose.agent.yml up -d
 ```
 
-**📚 See [DOCKER.md](docs/DOCKER.md) for complete guide**
+**📚 See [DEPLOYMENT-GUIDE.md](docs/DEPLOYMENT-GUIDE.md) for complete guide**
 
 ## Available Scripts
 
@@ -335,11 +342,14 @@ From the root directory, you can utilize Turborepo and pnpm to manage the worksp
 
 ## 📚 Documentation
 
+### Getting Started
 - **[Installation Guide](docs/INSTALLATION.md)** - Install VPN node
 - **[Deployment Guide](docs/DEPLOYMENT-GUIDE.md)** - Complete deployment guide
 - **[Architecture](docs/ARCHITECTURE.md)** - System design
+
+### Advanced
 - **[Multi-VPN Support](docs/MULTI-VPN-SUPPORT.md)** - OpenVPN, WireGuard, and more
-- **[Security Hardening](docs/SECURITY-HARDENING.md)** - Security guide
+- **[Security Hardening](docs/SECURITY-HARDENING.md)** - OpenVPN security best practices
 - **[API Reference](docs/API-ENDPOINTS.md)** - API documentation
 - **[Scripts](scripts/README.md)** - Available scripts
 
