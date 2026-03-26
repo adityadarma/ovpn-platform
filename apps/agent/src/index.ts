@@ -12,7 +12,7 @@ import { startHeartbeat } from './core/heartbeat'
 import { OpenVpnManagementDriver, WireGuardDriver, type VpnDriver } from './drivers'
 import { handleSyncCertificates } from './handlers/sync-certificates'
 import { handleSyncServerConfig } from './handlers/sync-server-config'
-import { startEventMonitor } from './services/event-monitor'
+import { startStatusMonitor } from './services/status-monitor'
 
 /**
  * Create VPN driver based on configuration
@@ -132,9 +132,9 @@ async function main() {
   startHeartbeat(env, driver)
   startPoller(env, driver)
   
-  // Start event monitor for realtime VPN events (OpenVPN only)
+  // Start status file monitor for realtime VPN events (OpenVPN only)
   if (env.VPN_TYPE === 'openvpn') {
-    startEventMonitor(env, driver)
+    startStatusMonitor(env, '/var/log/openvpn/status.log')
   }
 
   // Graceful shutdown

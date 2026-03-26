@@ -148,28 +148,46 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
 
   private processLine(line: string): void {
     // Skip empty lines and prompts
-    if (!line || line === '>' || line.startsWith('>INFO:')) {
+    if (!line || line === '>') {
       return
     }
 
-    // Debug: Log all lines that start with >CLIENT:
-    if (line.startsWith('>CLIENT:')) {
-      console.log('[openvpn-driver] 📥 Received event:', line)
+    // Debug: Log all lines that start with >
+    if (line.startsWith('>')) {
+      console.log('[openvpn-driver] 📥 Raw event:', line)
+    }
+
+    // Skip INFO messages but log them
+    if (line.startsWith('>INFO:')) {
+      return
     }
 
     // Handle realtime client events
-    if (line.includes('>CLIENT:CONNECT')) {
+    // Note: OpenVPN sends events in this order:
+    // 1. >CLIENT:CONNECT,{CID},{KID}
+    // 2. >CLIENT:ENV,... (multiple lines)
+    // 3. >CLIENT:ENV,END
+    
+    if (line.startsWith('>CLIENT:CONNECT,')) {
+      console.log('[openvpn-driver] ✅ CLIENT:CONNECT detected')
       this.handleClientConnect(line)
       return
     }
 
-    if (line.includes('>CLIENT:DISCONNECT')) {
+    if (line.startsWith('>CLIENT:DISCONNECT,')) {
+      console.log('[openvpn-driver] ✅ CLIENT:DISCONNECT detected')
       this.handleClientDisconnect(line)
       return
     }
 
-    if (line.includes('>CLIENT:REAUTH')) {
+    if (line.startsWith('>CLIENT:REAUTH,')) {
+      console.log('[openvpn-driver] ✅ CLIENT:REAUTH detected')
       this.handleClientReauth(line)
+      return
+    }
+
+    // Skip CLIENT:ENV lines (environment variables)
+    if (line.startsWith('>CLIENT:ENV,')) {
       return
     }
 
