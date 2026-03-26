@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, API_URL } from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
-import { Trash2, Download, Shield, Search, X, Plus, Key, Lock, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Trash2, Download, Shield, Search, X, Plus, Key, Lock, AlertTriangle, RefreshCw, Edit } from 'lucide-react'
 import type { User } from '@vpn/shared'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -16,15 +16,25 @@ interface CreateUserPayload {
   role: 'admin' | 'user'
 }
 
+interface EditUserPayload {
+  email?: string
+  password?: string
+  role?: 'admin' | 'user'
+  isActive?: boolean
+}
+
 export default function UsersPage() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
+  const [showEditForm, setShowEditForm] = useState(false)
   const [showCertModal, setShowCertModal] = useState(false)
   const [showCertListModal, setShowCertListModal] = useState(false)
   const [selectedUserForCert, setSelectedUserForCert] = useState<User | null>(null)
   const [selectedUserForCertList, setSelectedUserForCertList] = useState<User | null>(null)
+  const [selectedUserForEdit, setSelectedUserForEdit] = useState<User | null>(null)
   const [certForm, setCertForm] = useState({ nodeId: '', passwordProtected: false, password: '', validDays: 0 })
   const [form, setForm] = useState<CreateUserPayload>({ username: '', email: '', password: '', role: 'user' })
+  const [editForm, setEditForm] = useState<EditUserPayload>({ email: '', password: '', role: 'user', isActive: true })
   const [search, setSearch] = useState('')
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
   const [revokeReason, setRevokeReason] = useState('')
@@ -62,6 +72,25 @@ export default function UsersPage() {
       setShowForm(false)
       setForm({ username: '', email: '', password: '', role: 'user' })
       toast.success('User created successfully')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: EditUserPayload }) => {
+      const payload: any = {}
+      if (data.email !== undefined) payload.email = data.email || undefined
+      if (data.password) payload.password = data.password
+      if (data.role !== undefined) payload.role = data.role
+      if (data.isActive !== undefined) payload.isActive = data.isActive
+      return api.patch<User>(`/api/v1/users/${id}`, payload)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      setShowEditForm(false)
+      setSelectedUserForEdit(null)
+      setEditForm({ email: '', password: '', role: 'user', isActive: true })
+      toast.success('User updated successfully')
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -265,6 +294,17 @@ export default function UsersPage() {
     setShowCertListModal(true)
   }
 
+  const handleOpenEditModal = (user: User) => {
+    setSelectedUserForEdit(user)
+    setEditForm({
+      email: user.email || '',
+      password: '',
+      role: user.role,
+      isActive: user.is_active
+    })
+    setShowEditForm(true)
+  }
+
   const filtered = users.filter(u =>
     u.username.toLowerCase().includes(search.toLowerCase()) ||
     (u.email ?? '').toLowerCase().includes(search.toLowerCase())
@@ -449,6 +489,13 @@ export default function UsersPage() {
                 <td className="px-5 py-4">
                   <div className="flex items-center justify-end gap-1">
                     <button
+                      onClick={() => handleOpenEditModal(user)}
+                      className="p-2 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                      title="Edit user"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </button>
+                    <button
                       onClick={() => handleOpenCertModal(user)}
                       className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                       title="Generate certificate"
@@ -553,6 +600,129 @@ export default function UsersPage() {
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700"
                 >
                   {createMutation.isPending ? 'Creating...' : 'Create User'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditForm && selectedUserForEdit && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div>
+                <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <Edit className="h-5 w-5 text-violet-600" />
+                  Edit User
+                </h2>
+                <p className="text-sm text-gray-400 mt-0.5">Update user information</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowEditForm(false)
+                  setSelectedUserForEdit(null)
+                  setEditForm({ email: '', password: '', role: 'user', isActive: true })
+                }} 
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-md"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => { 
+                e.preventDefault()
+                updateMutation.mutate({ 
+                  id: selectedUserForEdit.id, 
+                  data: editForm 
+                })
+              }}
+              className="p-5 space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={selectedUserForEdit.username}
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500 cursor-not-allowed"
+                  title="Username cannot be changed after creation"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Username cannot be changed (used as certificate CN)
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  placeholder="john@example.com"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                  placeholder="Leave blank to keep current password"
+                  minLength={8}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Min. 8 characters. Leave blank to keep current password.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Role</label>
+                <select
+                  value={editForm.role}
+                  onChange={(e) => setEditForm({ ...editForm, role: e.target.value as 'admin' | 'user' })}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                >
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="isActive"
+                  checked={editForm.isActive}
+                  onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
+                  className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                />
+                <label htmlFor="isActive" className="text-sm font-medium text-gray-700 cursor-pointer">
+                  Account is active
+                </label>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowEditForm(false)
+                    setSelectedUserForEdit(null)
+                    setEditForm({ email: '', password: '', role: 'user', isActive: true })
+                  }}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={updateMutation.isPending}
+                  className="flex-1 bg-violet-600 hover:bg-violet-700"
+                >
+                  {updateMutation.isPending ? 'Updating...' : 'Update User'}
                 </Button>
               </div>
             </form>

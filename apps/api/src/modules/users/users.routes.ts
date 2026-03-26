@@ -72,8 +72,15 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       const user = await app.db('users').where({ id }).first()
       if (!user) return reply.status(404).send({ error: 'Not Found', message: 'User not found' })
 
+      // Username cannot be changed (it's used as certificate CN)
+      if (input.username && input.username !== user.username) {
+        return reply.status(400).send({ 
+          error: 'Bad Request', 
+          message: 'Username cannot be changed after creation' 
+        })
+      }
+
       const updates: Record<string, unknown> = {
-        ...(input.username && { username: input.username }),
         ...(input.email !== undefined && { email: input.email }),
         ...(input.role && { role: input.role }),
         ...(input.isActive !== undefined && { is_active: input.isActive }),
