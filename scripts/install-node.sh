@@ -237,7 +237,7 @@ user nobody
 group nogroup
 
 
-status /var/log/openvpn/status.log
+status /var/log/openvpn/status.log 1
 status-version 3
 log /var/log/openvpn/openvpn.log
 verb 3
