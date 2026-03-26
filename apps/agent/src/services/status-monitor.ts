@@ -1,11 +1,12 @@
 import { readFileSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import type { AgentEnv } from '../config/env'
 
 /**
- * Status File Monitor Service
+ * Status Monitor Service
  * 
- * Monitors OpenVPN status file for client connect/disconnect events.
- * This is a fallback when management interface events are not available.
+ * Monitors VPN status for client connect/disconnect events.
+ * Supports both OpenVPN (status file) and WireGuard (wg command).
  */
 
 interface StatusClient {
@@ -23,7 +24,7 @@ let isMonitoring = false
 /**
  * Parse OpenVPN status file (version 3)
  */
-function parseStatusFile(filePath: string): StatusClient[] {
+function parseOpenVpnStatusFile(filePath: string): StatusClient[] {
   if (!existsSync(filePath)) {
     return []
   }
@@ -38,17 +39,6 @@ function parseStatusFile(filePath: string): StatusClient[] {
         const parts = line.split('\t')
         
         if (parts.length >= 8) {
-          // CLIENT_LIST format (tab-separated):
-          // 0: CLIENT_LIST
-          // 1: Common Name
-          // 2: Real Address
-          // 3: Virtual Address
-          // 4: Virtual IPv6 Address
-          // 5: Bytes Received
-          // 6: Bytes Sent
-          // 7: Connected Since (epoch)
-          // 8: Connected Since (human readable)
-
           clients.push({
             commonName: parts[1],
             realAddress: parts[2],
@@ -63,8 +53,102 @@ function parseStatusFile(filePath: string): StatusClient[] {
 
     return clients
   } catch (err) {
-    console.error('[status-monitor] Failed to parse status file:', (err as Error).message)
+    console.error('[status-monitor] Failed to parse OpenVPN status file:', (err as Error).message)
     return []
+  }
+}
+
+/**
+ * Parse WireGuard status from `wg show` command
+ */
+function parseWireGuardStatus(interfaceName: string): StatusClient[] {
+  try {
+    // Run: wg show wg0 dump
+    // Output format (tab-separated):
+    // private-key  public-key  listen-port  fwmark
+    // public-key  preshared-key  endpoint  allowed-ips  latest-handshake  rx-bytes  tx-bytes  persistent-keepalive
+    
+    const output = execSync(`wg show ${interfaceName} dump`, { encoding: 'utf-8' })
+    const lines = output.trim().split('\n')
+    const clients: StatusClient[] = []
+    
+    // Skip first line (interface info)
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split('\t')
+      
+      if (parts.length >= 7) {
+        const publicKey = parts[0]
+        const endpoint = parts[2] || 'unknown'
+        const allowedIps = parts[3] || ''
+        const latestHandshake = parseInt(parts[4], 10) || 0
+        const rxBytes = parseInt(parts[5], 10) || 0
+        const txBytes = parseInt(parts[6], 10) || 0
+        
+        // Extract virtual IP from allowed-ips (e.g., "10.8.0.2/32" -> "10.8.0.2")
+        const virtualIp = allowedIps.split(',')[0]?.split('/')[0] || 'unknown'
+        
+        // Only include peers with recent handshake (within last 3 minutes)
+        const now = Math.floor(Date.now() / 1000)
+        if (latestHandshake > 0 && (now - latestHandshake) < 180) {
+          clients.push({
+            commonName: publicKey.substring(0, 16), // Use first 16 chars of public key as identifier
+            realAddress: endpoint,
+            virtualAddress: virtualIp,
+            bytesReceived: rxBytes,
+            bytesSent: txBytes,
+            connectedSince: new Date(latestHandshake * 1000),
+          })
+        }
+      }
+    }
+    
+    return clients
+  } catch (err) {
+    console.error('[status-monitor] Failed to parse WireGuard status:', (err as Error).message)
+    return []
+  }
+}
+
+/**
+ * TO ADD NEW VPN TYPE:
+ * 
+ * 1. Create a parse function like parseOpenVpnStatusFile or parseWireGuardStatus
+ * 2. Add case to parseStatus() switch statement
+ * 3. Add validation in startStatusMonitor()
+ * 4. Update VPN_TYPE enum in config/env.ts
+ * 
+ * Example for IPSec/IKEv2:
+ * 
+ * function parseIPSecStatus(): StatusClient[] {
+ *   try {
+ *     // Parse output from: ipsec statusall
+ *     // or: swanctl --list-sas
+ *     const output = execSync('ipsec statusall', { encoding: 'utf-8' })
+ *     // Parse output and return StatusClient[]
+ *   } catch (err) {
+ *     return []
+ *   }
+ * }
+ * 
+ * Then add to parseStatus():
+ *   case 'ipsec':
+ *     return parseIPSecStatus()
+ */
+
+/**
+ * Parse status based on VPN type
+ */
+function parseStatus(env: AgentEnv): StatusClient[] {
+  switch (env.VPN_TYPE) {
+    case 'wireguard':
+      return parseWireGuardStatus(env.WIREGUARD_INTERFACE)
+    
+    case 'openvpn':
+      return parseOpenVpnStatusFile('/var/log/openvpn/status.log')
+    
+    default:
+      console.error(`[status-monitor] Unsupported VPN type: ${env.VPN_TYPE}`)
+      return []
   }
 }
 
@@ -137,8 +221,8 @@ async function handleDisconnect(env: AgentEnv, client: StatusClient): Promise<vo
 /**
  * Check for client changes
  */
-async function checkClientChanges(env: AgentEnv, statusFilePath: string): Promise<void> {
-  const currentClients = parseStatusFile(statusFilePath)
+async function checkClientChanges(env: AgentEnv): Promise<void> {
+  const currentClients = parseStatus(env)
   const currentMap = new Map<string, StatusClient>()
   
   // Build current clients map
@@ -165,30 +249,46 @@ async function checkClientChanges(env: AgentEnv, statusFilePath: string): Promis
 }
 
 /**
- * Start monitoring OpenVPN status file
+ * Start monitoring VPN status
  */
-export function startStatusMonitor(env: AgentEnv, statusFilePath: string = '/var/log/openvpn/status.log'): void {
+export function startStatusMonitor(env: AgentEnv): void {
   if (isMonitoring) {
     console.warn('[status-monitor] Already monitoring')
     return
   }
   
-  console.log('📊 Status file monitor started')
+  console.log('📊 Status monitor started')
+  console.log(`   VPN Type: ${env.VPN_TYPE}`)
   console.log(`   Checking every 1s for client changes`)
   
-  // Check if file exists
-  if (!existsSync(statusFilePath)) {
-    console.error(`[status-monitor] ✗ Status file not found: ${statusFilePath}`)
-    console.error('[status-monitor] Make sure:')
-    console.error('  1. OpenVPN is running')
-    console.error('  2. Status file is configured in OpenVPN config')
-    console.error('  3. Volume is mounted in Docker (if using Docker)')
-    console.error('  4. Agent has read permission to the file')
-    return
+  // Validate VPN-specific requirements
+  if (env.VPN_TYPE === 'openvpn') {
+    const statusFilePath = '/var/log/openvpn/status.log'
+    if (!existsSync(statusFilePath)) {
+      console.error(`[status-monitor] ✗ Status file not found: ${statusFilePath}`)
+      console.error('[status-monitor] Make sure:')
+      console.error('  1. OpenVPN is running')
+      console.error('  2. Status file is configured in OpenVPN config')
+      console.error('  3. Volume is mounted in Docker (if using Docker)')
+      console.error('  4. Agent has read permission to the file')
+      return
+    }
+  } else if (env.VPN_TYPE === 'wireguard') {
+    // Check if wg command is available
+    try {
+      execSync('which wg', { stdio: 'ignore' })
+    } catch {
+      console.error('[status-monitor] ✗ WireGuard command not found')
+      console.error('[status-monitor] Make sure:')
+      console.error('  1. WireGuard is installed')
+      console.error('  2. Agent has permission to run wg command')
+      console.error('  3. WireGuard interface is configured')
+      return
+    }
   }
   
   // Initial load
-  const initialClients = parseStatusFile(statusFilePath)
+  const initialClients = parseStatus(env)
   for (const client of initialClients) {
     previousClients.set(client.commonName, client)
   }
@@ -205,10 +305,9 @@ export function startStatusMonitor(env: AgentEnv, statusFilePath: string = '/var
     }
   }
   
-  // Watch for file changes using interval polling (more reliable than watchFile in Docker)
-  // Check every 1 second for faster detection
+  // Watch for changes using interval polling
   const intervalId = setInterval(() => {
-    void checkClientChanges(env, statusFilePath)
+    void checkClientChanges(env)
   }, 1000)
   
   // Store interval ID for cleanup

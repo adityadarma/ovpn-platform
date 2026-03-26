@@ -132,10 +132,8 @@ async function main() {
   startHeartbeat(env, driver)
   startPoller(env, driver)
   
-  // Start status file monitor for realtime VPN events (OpenVPN only)
-  if (env.VPN_TYPE === 'openvpn') {
-    startStatusMonitor(env, '/var/log/openvpn/status.log')
-  }
+  // Start status monitor for realtime VPN events (supports all VPN types)
+  startStatusMonitor(env)
 
   // Graceful shutdown
   const shutdown = async () => {

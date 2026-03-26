@@ -43,7 +43,7 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       this.socket = new net.Socket()
 
       this.socket.on('connect', async () => {
-        console.log(`[openvpn-driver] Connected to Unix socket: ${this.socketPath}`)
+        console.log(`[openvpn-driver] Connected to management interface`)
         
         // Set connected BEFORE sending commands
         this.connected = true
@@ -53,18 +53,8 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
         
         // Enable realtime event notifications
         try {
-          console.log('[openvpn-driver] Enabling realtime events...')
           await this.sendCommand('state on')
-          console.log('[openvpn-driver] ✓ State notifications enabled')
-          
           await this.sendCommand('log on all')
-          console.log('[openvpn-driver] ✓ Log notifications enabled')
-          
-          // Test: Send status command to verify connection
-          const status = await this.sendCommand('status 3')
-          console.log('[openvpn-driver] ✓ Status command successful')
-          
-          console.log('[openvpn-driver] ✅ Realtime events fully enabled')
         } catch (err) {
           console.warn('[openvpn-driver] Failed to enable events:', err)
         }
@@ -88,7 +78,6 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       })
 
       this.socket.on('close', () => {
-        console.log(`[openvpn-driver] Connection closed (${this.socketPath})`)
         this.connected = false
         this.emit('disconnected')
         
@@ -101,7 +90,7 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
           
           this.reconnectAttempts++
           
-          console.log(`[openvpn-driver] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${Math.round(backoffDelay/1000)}s...`)
+          console.log(`[openvpn-driver] Reconnecting in ${Math.round(backoffDelay/1000)}s (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
           
           setTimeout(() => {
             if (!this.connected) {
@@ -111,13 +100,12 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
             }
           }, backoffDelay)
         } else {
-          console.error('[openvpn-driver] Max reconnect attempts reached. Giving up.')
+          console.error('[openvpn-driver] Max reconnect attempts reached')
           this.emit('error', new Error('Max reconnect attempts reached'))
         }
       })
 
       // Connect to Unix socket
-      console.log(`[openvpn-driver] Connecting to Unix socket: ${this.socketPath}`)
       this.socket.connect(this.socketPath)
     })
   }
@@ -152,12 +140,7 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       return
     }
 
-    // Debug: Log all lines that start with >
-    if (line.startsWith('>')) {
-      console.log('[openvpn-driver] 📥 Raw event:', line)
-    }
-
-    // Skip INFO messages but log them
+    // Skip INFO messages
     if (line.startsWith('>INFO:')) {
       return
     }
@@ -169,25 +152,27 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
     // 3. >CLIENT:ENV,END
     
     if (line.startsWith('>CLIENT:CONNECT,')) {
-      console.log('[openvpn-driver] ✅ CLIENT:CONNECT detected')
       this.handleClientConnect(line)
       return
     }
 
     if (line.startsWith('>CLIENT:DISCONNECT,')) {
-      console.log('[openvpn-driver] ✅ CLIENT:DISCONNECT detected')
       this.handleClientDisconnect(line)
       return
     }
 
     if (line.startsWith('>CLIENT:REAUTH,')) {
-      console.log('[openvpn-driver] ✅ CLIENT:REAUTH detected')
       this.handleClientReauth(line)
       return
     }
 
     // Skip CLIENT:ENV lines (environment variables)
     if (line.startsWith('>CLIENT:ENV,')) {
+      return
+    }
+    
+    // Skip LOG lines (too verbose)
+    if (line.startsWith('>LOG:')) {
       return
     }
 
