@@ -4,7 +4,6 @@ set -e
 echo "=========================================="
 echo "    Running Database Migrations...        "
 echo "=========================================="
-cd /app
 tsx node_modules/@vpn/db/src/migrate.ts
 
 echo "=========================================="

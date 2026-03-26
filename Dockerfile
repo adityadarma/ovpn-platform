@@ -64,6 +64,11 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 RUN cp -r /app/apps/api/dist /prod/api/dist
 RUN cp /app/apps/api/start.sh /prod/api/start.sh
 
+# Copy packages/db (workspace local package, not included by pnpm deploy --prod)
+RUN mkdir -p /prod/api/node_modules/@vpn/db
+RUN cp -r /app/packages/db/src /prod/api/node_modules/@vpn/db/src
+RUN cp -r /app/packages/db/node_modules /prod/api/node_modules/@vpn/db/node_modules 2>/dev/null || true
+
 # ============================================================
 # Runner Stage - Run both web and api
 # ============================================================
