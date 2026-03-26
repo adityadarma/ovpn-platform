@@ -1,9 +1,17 @@
+'use client'
+
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/layout/sidebar'
 import { Separator } from '@/components/ui/separator'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { useAuthGuard } from '@/hooks/use-auth-guard'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const authenticated = useAuthGuard()
+
+  // Render nothing while redirecting to login
+  if (!authenticated) return null
+
   return (
     <SidebarProvider>
       <AppSidebar />

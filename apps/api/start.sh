@@ -12,6 +12,6 @@ echo "=========================================="
 tsx node_modules/@vpn/db/src/seed.ts
 
 echo "=========================================="
-echo "    Starting API Backend...               "
+echo "    Starting API + Web Server...          "
 echo "=========================================="
 exec node dist/index.js

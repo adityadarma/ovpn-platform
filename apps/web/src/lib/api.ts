@@ -2,14 +2,10 @@ import { useAuthStore } from '@/store/auth.store'
 
 // Runtime configuration - can be changed without rebuild
 function getApiUrl(): string {
-  // Check if running in browser
   if (typeof window !== 'undefined') {
-    // Try to get from window.__ENV__ (injected at runtime)
     const runtimeUrl = (window as any).__ENV__?.NEXT_PUBLIC_API_URL
     if (runtimeUrl) return runtimeUrl
   }
-  
-  // Fallback to build-time env or default
   return process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001'
 }
 
@@ -19,11 +15,7 @@ export const API_URL = getApiUrl()
 let isRedirecting = false
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = useAuthStore.getState().token
-
-  const headers: Record<string, string> = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
+  const headers: Record<string, string> = {}
 
   if (options?.body) {
     headers['Content-Type'] = 'application/json'
@@ -35,11 +27,13 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
       ...headers,
       ...options?.headers as Record<string, string>,
     },
+    // Send httpOnly cookie on every request (works same-origin in prod,
+    // and cross-origin in dev when CORS credentials:true is configured)
+    credentials: 'include',
   })
 
   if (res.status === 401) {
     useAuthStore.getState().logout()
-    // Only redirect once to prevent multiple redirects
     if (typeof window !== 'undefined' && !isRedirecting && !window.location.pathname.includes('/login')) {
       isRedirecting = true
       window.location.href = '/login'

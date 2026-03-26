@@ -1,15 +1,13 @@
 # ============================================================
-# VPN Manager — Combined Web + API Docker Compose
+# VPN Manager — Docker Compose (Production)
 # ============================================================
-# This compose file uses a single container for both web and api
+# Single container: Fastify serves both API and Next.js static UI
+# Only one port exposed: 3001
 #
 # Usage:
-#   docker compose -f docker-compose.yml up -d
-#
-# Database Options:
-#   docker compose -f docker-compose.yml up -d                    # SQLite (default)
-#   docker compose -f docker-compose.yml --profile postgres up -d # PostgreSQL
-#   docker compose -f docker-compose.yml --profile mysql up -d    # MySQL/MariaDB
+#   docker compose up -d                             # SQLite (default)
+#   docker compose --profile postgres up -d          # PostgreSQL
+#   docker compose --profile mysql up -d             # MySQL/MariaDB
 # ============================================================
 
 services:
@@ -62,10 +60,9 @@ services:
     container_name: vpn-manager
     restart: unless-stopped
     environment:
-      # API Environment Variables
       NODE_ENV: production
-      PORT: ${API_PORT:-3001}
-      WEB_URL: ${WEB_URL:-http://localhost:3000}
+      PORT: ${PORT:-3001}
+      HOST: "0.0.0.0"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       NODE_REGISTRATION_KEY: ${NODE_REGISTRATION_KEY}
@@ -73,12 +70,10 @@ services:
       DATABASE_TYPE: ${DATABASE_TYPE:-sqlite}
       DATABASE_URL: ${DATABASE_URL}
       DATABASE_SQLITE_PATH: /data/vpn.sqlite
-      # Web Environment Variables
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      WEB_STATIC_PATH: /app/web
       NEXT_TELEMETRY_DISABLED: 1
     ports:
-      - "${WEB_PORT:-3000}:3000"
-      - "${API_PORT:-3001}:3001"
+      - "${PORT:-3001}:3001"
     volumes:
       - manager_data:/data
     depends_on:
@@ -89,7 +84,7 @@ services:
         condition: service_healthy
         required: false
     healthcheck:
-      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 && curl -f http://localhost:3001/api/v1/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -f http://localhost:3001/api/v1/health || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 10

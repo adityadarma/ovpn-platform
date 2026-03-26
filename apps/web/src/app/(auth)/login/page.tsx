@@ -36,10 +36,11 @@ export default function LoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
+        // Required: browser must send/receive cookies
+        credentials: 'include',
       })
 
       const data = await res.json() as {
-        token?: string
         user?: { id: string; username: string; email: string | null; role: string; lastLogin?: string }
         message?: string
       }
@@ -50,11 +51,10 @@ export default function LoginPage() {
         return
       }
 
-      login(data.token!, data.user!)
-      
-      // Set cookie for middleware
-      document.cookie = `vpn_token=${data.token}; path=/; max-age=604800; samesite=lax`
-      
+      // Token is in httpOnly cookie (set by API), no need to handle it here
+      // Just save user info to store for UI display
+      login(data.user!)
+
       toast.success('Successfully logged in')
       router.push('/dashboard')
     } catch {
@@ -82,6 +82,11 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {error && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="username">Username</Label>

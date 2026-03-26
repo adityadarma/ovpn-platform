@@ -1,31 +1,16 @@
 # ============================================================
-# Combined Web + API Dockerfile
+# Combined Web + API Dockerfile (CSR static + Fastify)
 # ============================================================
-# This Dockerfile builds both the Next.js web app and Fastify API
-# into a single container image. The API runs on port 3001 and
-# the web app runs on port 3000.
-#
-# Benefits:
-# - Single image to build and deploy
-# - Reduced image size (shared base layers)
-# - Simpler deployment (one container instead of two)
-# - Shared node_modules between web and api
-#
-# Drawbacks:
-# - Cannot scale web and api independently
-# - If one crashes, both go down
-# - Harder to debug (two processes in one container)
-#
-# Usage:
-#   docker build -f Dockerfile.combined -t vpn-manager:combined .
-#   docker run -p 3000:3000 -p 3001:3001 vpn-manager:combined
+# Next.js is built as static files (CSR, output: 'export').
+# Fastify serves both the API and the static web files.
+# Single process, single port (3001).
 # ============================================================
 
 FROM node:24-alpine AS base
 RUN npm install -g pnpm && apk add --no-cache python3 make g++ curl wget
 
 # ============================================================
-# Builder Stage - Build both web and api
+# Builder Stage
 # ============================================================
 FROM base AS builder
 WORKDIR /app
@@ -49,7 +34,7 @@ COPY packages/db ./packages/db
 COPY apps/web ./apps/web
 COPY apps/api ./apps/api
 
-# Build web (Next.js)
+# Build web (Next.js static export → /app/apps/web/out)
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @vpn/web build
 
@@ -69,76 +54,45 @@ RUN mkdir -p /prod/api/node_modules/@vpn/db
 RUN cp -r /app/packages/db/src /prod/api/node_modules/@vpn/db/src
 RUN cp -r /app/packages/db/node_modules /prod/api/node_modules/@vpn/db/node_modules 2>/dev/null || true
 
+# Copy Next.js static output → will be served by Fastify
+RUN cp -r /app/apps/web/out /prod/web
+
 # ============================================================
-# Runner Stage - Run both web and api
+# Runner Stage
 # ============================================================
 FROM node:24-alpine AS runner
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk add --no-cache curl wget bash supervisor
+RUN apk add --no-cache curl wget bash
 RUN npm install -g tsx
 
-# Create users
-RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && adduser -S apiuser -u 1001
 
 # Copy API files
-COPY --from=builder /prod/api /app/api
+COPY --from=builder --chown=apiuser:nodejs /prod/api /app/api
 RUN chmod +x /app/api/start.sh
 
-# Copy Web files
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./web
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./web/apps/web/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./web/apps/web/public
+# Copy Next.js static build (served by Fastify via @fastify/static)
+COPY --from=builder --chown=apiuser:nodejs /prod/web /app/web
 
 # Create data directory for SQLite
-RUN mkdir -p /data && chown -R nobody:nogroup /data
+RUN mkdir -p /data && chown -R apiuser:nodejs /data
 
-# Create supervisor config
-RUN mkdir -p /etc/supervisor/conf.d
-COPY <<'EOF' /etc/supervisor/conf.d/supervisord.conf
-[supervisord]
-nodaemon=true
-user=root
-logfile=/dev/stdout
-logfile_maxbytes=0
-loglevel=info
-
-[program:api]
-command=/app/api/start.sh
-directory=/app/api
-user=nobody
-autostart=true
-autorestart=true
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-environment=NODE_ENV="production",PORT="3001"
-
-[program:web]
-command=node apps/web/server.js
-directory=/app/web
-user=nextjs
-autostart=true
-autorestart=true
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-environment=NODE_ENV="production",PORT="3000",NEXT_TELEMETRY_DISABLED="1"
-EOF
+USER apiuser
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# Tell Fastify's static plugin where to find the web files
+ENV WEB_STATIC_PATH=/app/web
 
-# Expose both ports
-EXPOSE 3000 3001
+# Expose single port — Fastify serves both API and web
+EXPOSE 3001
 
-# Health check for both services
+# Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000 && \
-      curl -f http://localhost:3001/api/v1/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/api/v1/health || exit 1
 
-# Start supervisor to manage both processes
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Single entrypoint — the start.sh runs migrations then starts Fastify
+CMD ["/app/api/start.sh"]

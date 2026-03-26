@@ -1,16 +1,17 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+interface AuthUser {
+  id: string
+  username: string
+  email: string | null
+  role: string
+  lastLogin?: string | null
+}
+
 interface AuthState {
-  token: string | null
-  user: { 
-    id: string
-    username: string
-    email: string | null
-    role: string
-    lastLogin?: string | null
-  } | null
-  login: (token: string, user: AuthState['user']) => void
+  user: AuthUser | null
+  login: (user: AuthUser) => void
   logout: () => void
   isAuthenticated: () => boolean
 }
@@ -18,11 +19,10 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
-      token: null,
       user: null,
-      login: (token, user) => set({ token, user }),
-      logout: () => set({ token: null, user: null }),
-      isAuthenticated: () => !!get().token,
+      login: (user) => set({ user }),
+      logout: () => set({ user: null }),
+      isAuthenticated: () => !!get().user,
     }),
     {
       name: 'vpn-auth',

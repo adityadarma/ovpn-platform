@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, API_URL } from '@/lib/api'
-import { useAuthStore } from '@/store/auth.store'
 import { Trash2, Download, Shield, Search, X, Plus, Key, Lock, AlertTriangle, RefreshCw, Edit } from 'lucide-react'
 import type { User } from '@vpn/shared'
 import { toast } from 'sonner'
@@ -243,14 +242,12 @@ export default function UsersPage() {
   const handleDownloadConfig = async (user: User, certId?: string) => {
     try {
       setIsDownloading(certId || user.id)
-      const token = useAuthStore.getState().token
-      
       const url = certId 
         ? `${API_URL}/api/v1/users/${user.id}/vpn?certId=${certId}`
         : `${API_URL}/api/v1/users/${user.id}/vpn`
       
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       })
       
       if (!res.ok) {

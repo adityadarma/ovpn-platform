@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth.store'
+import { API_URL } from '@/lib/api'
 import {
   LayoutDashboard,
   Users,
@@ -55,9 +56,18 @@ export function AppSidebar() {
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
 
-  const handleLogout = () => {
-    document.cookie = 'vpn_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT'
+  const handleLogout = async () => {
+    try {
+      // Call API to clear httpOnly cookie (JS cannot clear httpOnly cookies directly)
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+    } catch {
+      // Ignore errors — proceed with local cleanup
+    }
     localStorage.removeItem('vpn-auth')
+    useAuthStore.getState().logout()
     window.location.href = '/login'
   }
 

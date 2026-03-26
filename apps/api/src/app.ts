@@ -5,10 +5,12 @@ import { NodeStatusChecker } from './services/node-status-checker'
 import { startCertRenewalScheduler } from './services/cert-renewal'
 
 import corsPlugin from './plugins/cors'
+import cookiePlugin from './plugins/cookie'
 import jwtPlugin from './plugins/jwt'
 import rateLimitPlugin from './plugins/rate-limit'
 import swaggerPlugin from './plugins/swagger'
 import dbPlugin from './plugins/db'
+import staticPlugin from './plugins/static'
 
 import healthRoutes from './modules/health/health.routes'
 import authRoutes from './modules/auth/auth.routes'
@@ -38,6 +40,7 @@ export async function buildApp(env: Env) {
 
   // Plugins
   await app.register(corsPlugin)
+  await app.register(cookiePlugin)  // must be before jwtPlugin
   await app.register(rateLimitPlugin)
   await app.register(dbPlugin, { db })
   await app.register(jwtPlugin, { secret: env.JWT_SECRET, expiresIn: env.JWT_EXPIRES_IN })
@@ -61,6 +64,11 @@ export async function buildApp(env: Env) {
     },
     { prefix: '/api/v1' },
   )
+
+  // Serve Next.js static build output (only in production)
+  if (env.NODE_ENV === 'production') {
+    await app.register(staticPlugin)
+  }
 
   // Start node status checker
   const nodeStatusChecker = new NodeStatusChecker(

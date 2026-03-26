@@ -18,6 +18,11 @@ export default fp(async (app, options: JwtPluginOptions) => {
   await app.register(fastifyJwt, {
     secret: options.secret,
     sign: { expiresIn: options.expiresIn },
+    // Read token from httpOnly cookie "vpn_token"
+    cookie: {
+      cookieName: 'vpn_token',
+      signed: false,
+    },
   })
 
   app.decorate('authenticate', async (request: FastifyRequest, reply: FastifyReply) => {

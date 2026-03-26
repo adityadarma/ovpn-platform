@@ -47,8 +47,26 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         role: user.role,
       })
 
-      return {
-        token,
+      // Parse expiresIn to seconds for cookie maxAge
+      // JWT_EXPIRES_IN format: '7d', '24h', '3600s', etc.
+      const parseExpiresIn = (v: string): number => {
+        const n = parseInt(v)
+        if (v.endsWith('d')) return n * 86400
+        if (v.endsWith('h')) return n * 3600
+        if (v.endsWith('m')) return n * 60
+        return n // assume seconds
+      }
+      const maxAge = parseExpiresIn(app.jwt.options.sign?.expiresIn as string ?? '7d')
+
+      reply.setCookie('vpn_token', token, {
+        httpOnly: true,
+        secure: process.env['NODE_ENV'] === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge,
+      })
+
+      return reply.send({
         user: {
           id: user.id,
           username: user.username,
@@ -56,7 +74,22 @@ const authRoutes: FastifyPluginAsync = async (app) => {
           role: user.role,
           lastLogin: now.toISOString(),
         },
-      }
+      })
+    },
+  )
+
+  // POST /api/v1/auth/logout
+  app.post(
+    '/auth/logout',
+    {
+      schema: {
+        tags: ['auth'],
+        summary: 'Logout and clear session cookie',
+      },
+    },
+    async (_request, reply) => {
+      reply.clearCookie('vpn_token', { path: '/' })
+      return reply.send({ message: 'Logged out successfully' })
     },
   )
 

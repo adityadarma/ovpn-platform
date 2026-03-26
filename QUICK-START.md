@@ -17,7 +17,7 @@ During installation, select:
 - Script will automatically install Manager + OpenVPN + Agent
 
 **Access:**
-- Web UI: http://YOUR_SERVER_IP:3000
+- Web UI + API: http://YOUR_SERVER_IP:3001
 - Login: `admin` / `Admin@1234!`
 - VPN Node: Auto-registered and ready
 
@@ -39,7 +39,7 @@ During installation, select:
 - **Installation mode:** `1) Manager Only`
 
 **Access:**
-- Web UI: http://YOUR_SERVER_IP:3000
+- Web UI + API: http://YOUR_SERVER_IP:3001
 - Login: `admin` / `Admin@1234!`
 
 #### Step 2: Install VPN Node
@@ -106,8 +106,7 @@ pnpm dev
 ```
 
 **Access:**
-- Web UI: http://localhost:3000
-- API: http://localhost:3001
+- Web UI + API: http://localhost:3001
 - Login: `admin` / `Admin@1234!`
 
 ---
