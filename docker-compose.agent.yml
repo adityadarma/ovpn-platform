@@ -49,6 +49,7 @@ services:
       - /run/openvpn:/run/openvpn  # Unix socket directory
       - /etc/openvpn/server:/etc/openvpn/server
       - /etc/openvpn/easy-rsa:/etc/openvpn/easy-rsa
+      - /var/log/openvpn:/var/log/openvpn:ro  # Status log (read-only)
     
     logging:
       driver: "json-file"

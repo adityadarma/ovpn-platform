@@ -142,17 +142,23 @@ async function handleDisconnect(env: AgentEnv, client: StatusClient): Promise<vo
  * Check for client changes
  */
 async function checkClientChanges(env: AgentEnv, statusFilePath: string): Promise<void> {
+  console.log('[status-monitor] Checking for client changes...')
+  
   const currentClients = parseStatusFile(statusFilePath)
   const currentMap = new Map<string, StatusClient>()
+  
+  console.log(`[status-monitor] Found ${currentClients.length} clients in status file`)
   
   // Build current clients map
   for (const client of currentClients) {
     currentMap.set(client.commonName, client)
+    console.log(`[status-monitor]   - ${client.commonName} (${client.virtualAddress})`)
   }
   
   // Detect new connections
   for (const [commonName, client] of currentMap) {
     if (!previousClients.has(commonName)) {
+      console.log(`[status-monitor] 🆕 New client detected: ${commonName}`)
       await handleConnect(env, client)
     }
   }
@@ -160,6 +166,7 @@ async function checkClientChanges(env: AgentEnv, statusFilePath: string): Promis
   // Detect disconnections
   for (const [commonName, client] of previousClients) {
     if (!currentMap.has(commonName)) {
+      console.log(`[status-monitor] 👋 Client disconnected: ${commonName}`)
       await handleDisconnect(env, client)
     }
   }
@@ -182,6 +189,19 @@ export function startStatusMonitor(env: AgentEnv, statusFilePath: string = '/var
   console.log(`   VPN Token: ${env.VPN_TOKEN.substring(0, 10)}...`)
   console.log(`   API URL: ${env.AGENT_MANAGER_URL}/api/v1/vpn/connect`)
   
+  // Check if file exists
+  if (!existsSync(statusFilePath)) {
+    console.error(`[status-monitor] ✗ Status file not found: ${statusFilePath}`)
+    console.error('[status-monitor] Make sure:')
+    console.error('  1. OpenVPN is running')
+    console.error('  2. Status file is configured in OpenVPN config')
+    console.error('  3. Volume is mounted in Docker (if using Docker)')
+    console.error('  4. Agent has read permission to the file')
+    return
+  }
+  
+  console.log(`[status-monitor] ✓ Status file found`)
+  
   // Initial load
   const initialClients = parseStatusFile(statusFilePath)
   for (const client of initialClients) {
@@ -189,12 +209,20 @@ export function startStatusMonitor(env: AgentEnv, statusFilePath: string = '/var
   }
   console.log(`[status-monitor] Loaded ${initialClients.length} existing clients`)
   
+  if (initialClients.length > 0) {
+    console.log('[status-monitor] Current clients:')
+    for (const client of initialClients) {
+      console.log(`  - ${client.commonName} (${client.virtualAddress})`)
+    }
+  }
+  
   // Watch for file changes
   watchFile(statusFilePath, { interval: 2000 }, () => {
     void checkClientChanges(env, statusFilePath)
   })
   
   isMonitoring = true
+  console.log('[status-monitor] ✓ Monitoring active (checking every 2s)')
 }
 
 /**
