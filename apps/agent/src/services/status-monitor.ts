@@ -157,6 +157,12 @@ function parseStatus(env: AgentEnv): StatusClient[] {
  */
 async function handleConnect(env: AgentEnv, client: StatusClient): Promise<void> {
   try {
+    console.log(`[status-monitor] 🔄 Sending connect request for ${client.commonName}`)
+    console.log(`[status-monitor]    VPN IP: ${client.virtualAddress}`)
+    console.log(`[status-monitor]    Real IP: ${client.realAddress.split(':')[0]}`)
+    console.log(`[status-monitor]    Node ID: ${env.AGENT_NODE_ID}`)
+    console.log(`[status-monitor]    API URL: ${env.AGENT_MANAGER_URL}/api/v1/vpn/connect`)
+    
     const response = await fetch(`${env.AGENT_MANAGER_URL}/api/v1/vpn/connect`, {
       method: 'POST',
       headers: {
@@ -174,14 +180,14 @@ async function handleConnect(env: AgentEnv, client: StatusClient): Promise<void>
     
     if (!response.ok) {
       const text = await response.text()
-      console.error(`[status-monitor] Connect API failed: ${response.status} ${text}`)
+      console.error(`[status-monitor] ✗ Connect API failed: ${response.status} ${text}`)
       return
     }
     
     const data = await response.json() as { session_id: string }
     console.log(`[status-monitor] ✓ ${client.commonName} connected → session ${data.session_id}`)
   } catch (err) {
-    console.error('[status-monitor] Connect API error:', (err as Error).message)
+    console.error('[status-monitor] ✗ Connect API error:', (err as Error).message)
   }
 }
 
@@ -233,6 +239,7 @@ async function checkClientChanges(env: AgentEnv): Promise<void> {
   // Detect new connections
   for (const [commonName, client] of currentMap) {
     if (!previousClients.has(commonName)) {
+      console.log(`[status-monitor] 🆕 New client detected: ${commonName}`)
       await handleConnect(env, client)
     }
   }
@@ -240,6 +247,7 @@ async function checkClientChanges(env: AgentEnv): Promise<void> {
   // Detect disconnections
   for (const [commonName, client] of previousClients) {
     if (!currentMap.has(commonName)) {
+      console.log(`[status-monitor] 👋 Client disconnected: ${commonName}`)
       await handleDisconnect(env, client)
     }
   }

@@ -23,7 +23,30 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     '/nodes',
     { onRequest: [app.authenticate], schema: { tags: ['nodes'], summary: 'List all VPN nodes', security: [{ bearerAuth: [] }] } },
-    async () => app.db('vpn_nodes').select('id', 'hostname', 'ip_address', 'port', 'region', 'status', 'version', 'last_seen', 'created_at'),
+    async () => {
+      // Get all nodes
+      const nodes = await app.db('vpn_nodes')
+        .select('id', 'hostname', 'ip_address', 'port', 'region', 'status', 'version', 'last_seen', 'created_at')
+      
+      // Get active sessions count for each node
+      const sessionCounts = await app.db('vpn_sessions')
+        .select('node_id')
+        .count('* as count')
+        .whereNull('disconnected_at')
+        .groupBy('node_id')
+      
+      // Create a map of node_id -> active_sessions count
+      const sessionCountMap = new Map<string, number>()
+      for (const row of sessionCounts as any[]) {
+        sessionCountMap.set(String(row.node_id), Number(row.count))
+      }
+      
+      // Add active_sessions to each node
+      return nodes.map(node => ({
+        ...node,
+        active_sessions: sessionCountMap.get(node.id) || 0
+      }))
+    },
   )
 
   // GET /api/v1/nodes/me (for agent self-check with node token)
