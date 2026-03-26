@@ -1,11 +1,11 @@
 name: Build and Push Docker Images
 
 on:
-  # Manual trigger only (default)
+  # Manual trigger
   workflow_dispatch:
     inputs:
-      services:
-        description: 'Services to build (comma-separated: api,web,agent or "all")'
+      images:
+        description: 'Images to build (comma-separated: manager,agent or "all")'
         required: true
         default: 'all'
         type: string
@@ -20,7 +20,7 @@ on:
     tags:
       - 'v*.*.*'
     
-    # Auto-trigger on version tags and optionally on file changes
+    # Auto-trigger on main branch changes
     branches:
       - main
     paths:
@@ -28,80 +28,81 @@ on:
       - 'apps/web/**'
       - 'apps/agent/**'
       - 'packages/**'
+      - 'Dockerfile'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: vpn-manager
+  MANAGER_IMAGE: vpn-manager
+  AGENT_IMAGE: vpn-agent
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # Determine which services to build
+  # Determine which images to build
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      services: ${{ steps.set-services.outputs.services }}
-      should_build: ${{ steps.set-services.outputs.should_build }}
+      images: ${{ steps.set-images.outputs.images }}
+      should_build: ${{ steps.set-images.outputs.should_build }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 2
       
-      - name: Determine services to build
-        id: set-services
+      - name: Determine images to build
+        id: set-images
         run: |
-          # Default: build all services
-          SERVICES='["api","web","agent"]'
+          # Default: build all images
+          IMAGES='["manager","agent"]'
           SHOULD_BUILD="true"
           
-          # If manual trigger with specific services
+          # If manual trigger with specific images
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            INPUT="${{ inputs.services }}"
+            INPUT="${{ inputs.images }}"
             if [ "$INPUT" != "all" ]; then
               # Convert comma-separated to JSON array
-              SERVICES=$(echo "$INPUT" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$";""))')
+              IMAGES=$(echo "$INPUT" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$";""))')
             fi
             SHOULD_BUILD="${{ inputs.push_images }}"
           fi
           
           # If triggered by tag, build all
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            SERVICES='["api","web","agent"]'
+            IMAGES='["manager","agent"]'
             SHOULD_BUILD="true"
           fi
           
           # If triggered by push, detect changed files
           if [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" != refs/tags/* ]]; then
-            CHANGED_SERVICES=()
+            CHANGED_IMAGES=()
             
-            # Check which apps changed
-            if git diff --name-only HEAD^ HEAD | grep -q "^apps/api/"; then
-              CHANGED_SERVICES+=("api")
+            # Check if manager files changed (web, api, or Dockerfile)
+            if git diff --name-only HEAD^ HEAD | grep -qE "^(apps/api/|apps/web/|Dockerfile)"; then
+              CHANGED_IMAGES+=("manager")
             fi
-            if git diff --name-only HEAD^ HEAD | grep -q "^apps/web/"; then
-              CHANGED_SERVICES+=("web")
-            fi
+            
+            # Check if agent files changed
             if git diff --name-only HEAD^ HEAD | grep -q "^apps/agent/"; then
-              CHANGED_SERVICES+=("agent")
+              CHANGED_IMAGES+=("agent")
             fi
             
             # Check if shared packages changed (rebuild all)
             if git diff --name-only HEAD^ HEAD | grep -q "^packages/"; then
-              CHANGED_SERVICES=("api" "web" "agent")
+              CHANGED_IMAGES=("manager" "agent")
             fi
             
-            # If no services changed, skip build
-            if [ ${#CHANGED_SERVICES[@]} -eq 0 ]; then
-              echo "No service files changed, skipping build"
+            # If no images changed, skip build
+            if [ ${#CHANGED_IMAGES[@]} -eq 0 ]; then
+              echo "No image files changed, skipping build"
               SHOULD_BUILD="false"
             else
-              SERVICES=$(printf '%s\n' "${CHANGED_SERVICES[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+              IMAGES=$(printf '%s\n' "${CHANGED_IMAGES[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
             fi
           fi
           
-          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+          echo "images=$IMAGES" >> $GITHUB_OUTPUT
           echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
-          echo "Services to build: $SERVICES"
+          echo "Images to build: $IMAGES"
           echo "Should build: $SHOULD_BUILD"
 
   build-and-push:
@@ -114,7 +115,7 @@ jobs:
     
     strategy:
       matrix:
-        service: ${{ fromJson(needs.prepare.outputs.services) }}
+        image: ${{ fromJson(needs.prepare.outputs.images) }}
     
     steps:
       - name: Checkout repository
@@ -131,37 +132,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
+      - name: Set image name and dockerfile
+        id: image-config
+        run: |
+          if [ "${{ matrix.image }}" = "manager" ]; then
+            echo "image_name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.MANAGER_IMAGE }}" >> $GITHUB_OUTPUT
+            echo "dockerfile=Dockerfile" >> $GITHUB_OUTPUT
+          else
+            echo "image_name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.AGENT_IMAGE }}" >> $GITHUB_OUTPUT
+            echo "dockerfile=apps/agent/Dockerfile" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image-config.outputs.image_name }}
           flavor: |
-            latest=false
+            latest=auto
           tags: |
-            type=raw,value=${{ matrix.service }}
-            type=raw,value=${{ matrix.service }}-{{branch}},enable=${{ github.ref != format('refs/heads/{0}', 'main') }}
-            type=semver,pattern={{version}}-${{ matrix.service }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
       
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: apps/${{ matrix.service }}/Dockerfile
+          file: ${{ steps.image-config.outputs.dockerfile }}
           push: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_images == true) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=gha,scope=${{ matrix.service }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+            type=gha,scope=${{ matrix.image }}
+            type=registry,ref=${{ steps.image-config.outputs.image_name }}:latest
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           platforms: linux/amd64
+          # Uncomment for multi-arch builds (slower)
           # platforms: linux/amd64,linux/arm64
           build-args: |
             BUILDKIT_INLINE_CACHE=1
       
       - name: Image digest
-        run: echo "Image pushed with digest ${{ steps.meta.outputs.digest }}"
+        run: |
+          echo "Image: ${{ steps.image-config.outputs.image_name }}"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "Digest: ${{ steps.meta.outputs.digest }}"
   
   test-deployment:
     needs: [prepare, build-and-push]
@@ -189,31 +208,24 @@ jobs:
           # Set WEB_URL for CORS
           sed -i 's|WEB_URL=http://localhost:3000|WEB_URL=http://localhost:3000|' .env
           
-          # Add dummy agent variables to prevent errors (agent won't start without profile)
-          echo "" >> .env
-          echo "# Agent (not used in test)" >> .env
-          echo "AGENT_MANAGER_URL=http://localhost:3001" >> .env
-          echo "AGENT_NODE_ID=test-node-id" >> .env
-          echo "AGENT_SECRET_TOKEN=test-secret-token" >> .env
+          # Add VPN_TOKEN
+          echo "VPN_TOKEN=test-vpn-token-for-ci" >> .env
       
-      - name: Start services
+      - name: Start manager service
         run: |
-          docker compose pull api web
-          docker compose up -d api web
-          echo "Waiting for services to be ready..."
+          docker compose pull manager
+          docker compose up -d manager
+          echo "Waiting for manager to be ready..."
           
-          # Wait for API to be healthy (max 2 minutes)
+          # Wait for manager to be healthy (max 2 minutes)
           for i in {1..24}; do
-            if docker compose ps api | grep -q "healthy"; then
-              echo "API is healthy!"
+            if docker compose ps manager | grep -q "healthy"; then
+              echo "Manager is healthy!"
               break
             fi
-            echo "Waiting for API... ($i/24)"
+            echo "Waiting for manager... ($i/24)"
             sleep 5
           done
-          
-          # Additional wait for web
-          sleep 10
       
       - name: Check service health
         run: |
@@ -228,12 +240,66 @@ jobs:
       - name: View logs on failure
         if: failure()
         run: |
-          echo "=== API Logs ==="
-          docker compose logs api
-          echo "=== Web Logs ==="
-          docker compose logs web
+          echo "=== Manager Logs ==="
+          docker compose logs manager
       
       - name: Cleanup
         if: always()
         run: |
           docker compose down -v
+
+  # Create GitHub Release on version tags
+  create-release:
+    needs: [prepare, build-and-push, test-deployment]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release v${{ steps.version.outputs.version }}
+          body: |
+            ## VPN Manager v${{ steps.version.outputs.version }}
+            
+            ### Docker Images
+            
+            **Manager (Web + API):**
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/vpn-manager:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/vpn-manager:latest
+            ```
+            
+            **Agent:**
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/vpn-agent:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/vpn-agent:latest
+            ```
+            
+            ### Quick Start
+            
+            **Deploy Manager:**
+            ```bash
+            docker compose up -d
+            ```
+            
+            **Deploy Agent:**
+            ```bash
+            docker compose -f docker-compose.agent.yml up -d
+            ```
+          draft: false
+          prerelease: false

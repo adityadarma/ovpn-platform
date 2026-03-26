@@ -293,32 +293,29 @@ docker compose -f docker-compose.dev.yml up
 
 ### Production
 
-**Option 1: With Repository (Local Build)**
+**Deploy Manager:**
 ```bash
-# Clone and build
+# Quick install (recommended)
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
+
+# Or with repository
 git clone https://github.com/adityadarma/vpn-manager.git
 cd vpn-manager
 cp .env.example .env
-nano .env  # Configure
+nano .env  # Configure JWT_SECRET, etc.
 
 # Build and start
 docker compose build
 docker compose up -d
 ```
 
-**Option 2: Without Repository (Pre-built Images)** ⭐ Recommended
+**Deploy Agent (on VPN nodes):**
 ```bash
-# One-line install
-curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-manager.sh | sudo bash
+# Quick install
+curl -fsSL https://raw.githubusercontent.com/adityadarma/vpn-manager/main/scripts/install-node.sh | sudo bash
 
 # Or manual
-wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/docker-compose.yml
-wget https://raw.githubusercontent.com/adityadarma/vpn-manager/main/.env.production -O .env
-nano .env  # Configure JWT_SECRET, etc.
-
-# Pull and start
-docker compose pull
-docker compose up -d
+docker compose -f docker-compose.agent.yml up -d
 ```
 
 **📚 See [DOCKER.md](docs/DOCKER.md) for complete guide**
@@ -339,6 +336,7 @@ From the root directory, you can utilize Turborepo and pnpm to manage the worksp
 ## 📚 Documentation
 
 - **[Installation Guide](docs/INSTALLATION.md)** - Install VPN node
+- **[Deployment Guide](docs/DEPLOYMENT-GUIDE.md)** - Complete deployment guide
 - **[Architecture](docs/ARCHITECTURE.md)** - System design
 - **[Multi-VPN Support](docs/MULTI-VPN-SUPPORT.md)** - OpenVPN, WireGuard, and more
 - **[Security Hardening](docs/SECURITY-HARDENING.md)** - Security guide

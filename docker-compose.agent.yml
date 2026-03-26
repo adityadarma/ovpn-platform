@@ -26,7 +26,10 @@
 
 services:
   agent:
-    image: ghcr.io/adityadarma/vpn-manager:agent
+    image: ghcr.io/adityadarma/vpn-agent:latest
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
     container_name: vpn-agent
     restart: unless-stopped
     environment:
