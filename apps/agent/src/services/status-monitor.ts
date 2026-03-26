@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, watchFile } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import type { AgentEnv } from '../config/env'
 
 /**
@@ -214,12 +214,24 @@ export function startStatusMonitor(env: AgentEnv, statusFilePath: string = '/var
     for (const client of initialClients) {
       console.log(`  - ${client.commonName} (${client.virtualAddress})`)
     }
+    
+    // Sync existing clients to database (in case agent restarted while clients connected)
+    console.log('[status-monitor] Syncing existing clients to database...')
+    for (const client of initialClients) {
+      // Don't await - fire and forget
+      void handleConnect(env, client).catch(err => {
+        console.error(`[status-monitor] Failed to sync ${client.commonName}:`, err)
+      })
+    }
   }
   
-  // Watch for file changes
-  watchFile(statusFilePath, { interval: 2000 }, () => {
+  // Watch for file changes using interval polling (more reliable than watchFile in Docker)
+  const intervalId = setInterval(() => {
     void checkClientChanges(env, statusFilePath)
-  })
+  }, 2000)
+  
+  // Store interval ID for cleanup
+  ;(global as any).__statusMonitorInterval = intervalId
   
   isMonitoring = true
   console.log('[status-monitor] ✓ Monitoring active (checking every 2s)')
@@ -229,6 +241,10 @@ export function startStatusMonitor(env: AgentEnv, statusFilePath: string = '/var
  * Stop monitoring
  */
 export function stopStatusMonitor(): void {
+  if ((global as any).__statusMonitorInterval) {
+    clearInterval((global as any).__statusMonitorInterval)
+    delete (global as any).__statusMonitorInterval
+  }
   isMonitoring = false
   previousClients.clear()
 }
