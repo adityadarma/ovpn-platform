@@ -71,7 +71,6 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       DATABASE_SQLITE_PATH: /data/vpn.sqlite
       WEB_STATIC_PATH: /app/web
-      NEXT_TELEMETRY_DISABLED: 1
     ports:
       - "${PORT:-3001}:3001"
     volumes:

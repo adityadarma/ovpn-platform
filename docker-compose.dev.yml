@@ -64,7 +64,7 @@ services:
     image: node:24-alpine
     container_name: vpn-api-dev
     working_dir: /app
-    command: sh -c "npm install -g pnpm && pnpm install && pnpm --filter @vpn/api dev"
+    command: sh -c "apk add --no-cache python3 make g++ && npm install -g pnpm && pnpm install && pnpm --filter @vpn/api dev"
     environment:
       NODE_ENV: development
       PORT: "3001"
@@ -93,30 +93,30 @@ services:
         required: false
     healthcheck:
       test: [ "CMD-SHELL", "wget -qO- http://localhost:3001/api/v1/health || exit 1" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 5m   # first run compiles better-sqlite3 from source (~3-4 min)
     networks:
       - vpn-dev-network
 
-  # ── Development Web UI — Next.js dev server with hot-reload ──
+  # ── Development Web UI — Vite dev server with hot-reload ──
   web:
     image: node:24-alpine
     container_name: vpn-web-dev
     working_dir: /app
-    command: sh -c "npm install -g pnpm && pnpm install && pnpm --filter @vpn/web dev"
+    command: sh -c "apk add --no-cache python3 make g++ && npm install -g pnpm && pnpm install && pnpm --filter @vpn/web dev"
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://localhost:3001
-      WATCHPACK_POLLING: "true"
+      # In Docker, browser fetches go via host machine so localhost:3001 is correct
+      # (Vite embeds this into the JS bundle at build time via import.meta.env)
+      VITE_API_URL: http://localhost:3001
     ports:
-      - "3000:3000"
+      - "3000:5173"
     volumes:
       - .:/app
       - pnpm_store:/root/.local/share/pnpm/store
       - node_modules_cache:/app/node_modules
-      - /app/apps/web/.next
     depends_on:
       api:
         condition: service_healthy
@@ -149,7 +149,7 @@ services:
       # - /run/openvpn:/run/openvpn
       # - /etc/openvpn/server:/etc/openvpn/server:ro
       # - /var/log/openvpn:/var/log/openvpn:ro
-    # ⚠️  Host network required for VPN management interface access
+      # ⚠️  Host network required for VPN management interface access
     network_mode: host
     profiles: [ agent ]
 

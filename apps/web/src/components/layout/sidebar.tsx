@@ -1,7 +1,4 @@
-'use client'
-
-import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { useRouterState, useNavigate } from '@tanstack/react-router'
 import { useAuthStore } from '@/store/auth.store'
 import { API_URL } from '@/lib/api'
 import {
@@ -39,7 +36,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/users', label: 'Users', icon: Users },
   { href: '/groups', label: 'Groups', icon: UsersRound },
   { href: '/networks', label: 'Networks', icon: Network },
@@ -49,16 +46,17 @@ const NAV_ITEMS = [
   { href: '/tasks', label: 'Tasks', icon: ListTodo },
   { href: '/audit', label: 'Audit Logs', icon: FileText, adminOnly: true },
   { href: '/settings', label: 'Settings', icon: Settings },
-]
+] as const
 
 export function AppSidebar() {
-  const pathname = usePathname()
-  const router = useRouter()
+  const location = useRouterState({ select: (s) => s.location })
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
+
+  const pathname = location.pathname
 
   const handleLogout = async () => {
     try {
-      // Call API to clear httpOnly cookie (JS cannot clear httpOnly cookies directly)
       await fetch(`${API_URL}/api/v1/auth/logout`, {
         method: 'POST',
         credentials: 'include',
@@ -95,15 +93,15 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_ITEMS.filter(item => !item.adminOnly || user?.role === 'admin').map(({ href, label, icon: Icon }) => {
-                const active = pathname.startsWith(href) && (href !== '/dashboard' || pathname === '/dashboard')
+              {NAV_ITEMS.filter(item => !('adminOnly' in item && item.adminOnly) || user?.role === 'admin').map(({ href, label, icon: Icon }) => {
+                const active = pathname.startsWith(href) && (href !== '/' || pathname === '/')
                 return (
                   <SidebarMenuItem key={href}>
                     <SidebarMenuButton
                       id={`nav-link-${href.replace(/[^a-z0-9]/g, '-')}`}
                       isActive={active}
                       tooltip={label}
-                      render={<Link href={href} />}
+                      onClick={() => navigate({ to: href })}
                     >
                       <Icon />
                       <span>{label}</span>
@@ -142,7 +140,7 @@ export function AppSidebar() {
                 align="end"
                 sideOffset={4}
               >
-                <DropdownMenuItem onClick={() => router.push('/profile')} className="cursor-pointer">
+                <DropdownMenuItem onClick={() => navigate({ to: '/profile' })} className="cursor-pointer">
                   <UserCircle className="mr-2 h-4 w-4" />
                   Profile
                 </DropdownMenuItem>

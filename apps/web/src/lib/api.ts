@@ -3,10 +3,10 @@ import { useAuthStore } from '@/store/auth.store'
 // Runtime configuration - can be changed without rebuild
 function getApiUrl(): string {
   if (typeof window !== 'undefined') {
-    const runtimeUrl = (window as any).__ENV__?.NEXT_PUBLIC_API_URL
+    const runtimeUrl = (window as unknown as { __ENV__?: { VITE_API_URL?: string } }).__ENV__?.VITE_API_URL
     if (runtimeUrl) return runtimeUrl
   }
-  return process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001'
+  return import.meta.env.VITE_API_URL ?? ''
 }
 
 export const API_URL = getApiUrl()

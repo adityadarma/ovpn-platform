@@ -25,7 +25,7 @@ COPY apps/api/package.json ./apps/api/
 
 # Install all dependencies
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+  pnpm install --frozen-lockfile
 
 # Copy source code
 COPY packages/shared ./packages/shared
@@ -34,8 +34,7 @@ COPY packages/db ./packages/db
 COPY apps/web ./apps/web
 COPY apps/api ./apps/api
 
-# Build web (Next.js static export → /app/apps/web/out)
-ENV NEXT_TELEMETRY_DISABLED=1
+# Build web (Vite static export -> /app/apps/web/dist)
 RUN pnpm --filter @vpn/web build
 
 # Build api (Fastify with tsup)
@@ -43,7 +42,7 @@ RUN pnpm --filter @vpn/api build
 
 # Deploy production dependencies for API
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm deploy --filter @vpn/api --prod /prod/api
+  pnpm deploy --filter @vpn/api --prod /prod/api
 
 # Copy built API bundle
 RUN cp -r /app/apps/api/dist /prod/api/dist
@@ -54,8 +53,8 @@ RUN mkdir -p /prod/api/node_modules/@vpn/db
 RUN cp -r /app/packages/db/src /prod/api/node_modules/@vpn/db/src
 RUN cp -r /app/packages/db/node_modules /prod/api/node_modules/@vpn/db/node_modules 2>/dev/null || true
 
-# Copy Next.js static output → will be served by Fastify
-RUN cp -r /app/apps/web/out /prod/web
+# Copy Vite static output -> will be served by Fastify
+RUN cp -r /app/apps/web/dist /prod/web
 
 # ============================================================
 # Runner Stage
@@ -83,7 +82,6 @@ RUN mkdir -p /data && chown -R apiuser:nodejs /data
 USER apiuser
 
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
 # Tell Fastify's static plugin where to find the web files
 ENV WEB_STATIC_PATH=/app/web
 

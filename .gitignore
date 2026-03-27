@@ -54,4 +54,5 @@ coverage/
 
 # Package manager state
 .pnpm-state
+.pnpm-store
 pnpm-lock.yaml.bak
