@@ -72,7 +72,7 @@ services:
       DATABASE_SQLITE_PATH: /data/vpn.sqlite
       WEB_STATIC_PATH: /app/web
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       - manager_data:/data
     depends_on:
@@ -83,7 +83,7 @@ services:
         condition: service_healthy
         required: false
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:3000/api/v1/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -f http://localhost:${PORT:-3000}/api/v1/health || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 10
