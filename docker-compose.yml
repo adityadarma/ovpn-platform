@@ -1,8 +1,8 @@
 # ============================================================
 # VPN Manager — Docker Compose (Production)
 # ============================================================
-# Single container: Fastify serves both API and Next.js static UI
-# Only one port exposed: 3001
+# Single container: Fastify serves both API and Vite static UI
+# Only one port exposed: 3000
 #
 # Usage:
 #   docker compose up -d                             # SQLite (default)
@@ -61,7 +61,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      PORT: ${PORT:-3001}
+      PORT: ${PORT:-3000}
       HOST: "0.0.0.0"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
@@ -72,7 +72,7 @@ services:
       DATABASE_SQLITE_PATH: /data/vpn.sqlite
       WEB_STATIC_PATH: /app/web
     ports:
-      - "${PORT:-3001}:3001"
+      - "${PORT:-3000}:3000"
     volumes:
       - manager_data:/data
     depends_on:
@@ -83,7 +83,7 @@ services:
         condition: service_healthy
         required: false
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:3001/api/v1/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -f http://localhost:3000/api/v1/health || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 10

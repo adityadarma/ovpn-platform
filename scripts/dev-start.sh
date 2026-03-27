@@ -32,9 +32,9 @@ case "$MODE" in
     pnpm install
     run_migrations
     echo ""
-    echo "   Web UI:   http://localhost:3000"
-    echo "   API:      http://localhost:3001"
-    echo "   API Docs: http://localhost:3001/docs"
+    echo "   Web UI:   http://localhost:5173"
+    echo "   API:      http://localhost:3000"
+    echo "   API Docs: http://localhost:3000/docs"
     echo "   Login:    admin / Admin@1234!"
     echo ""
     pnpm dev
@@ -57,8 +57,8 @@ case "$MODE" in
     sleep 5
     docker compose exec api sh -c "pnpm db:migrate && pnpm db:seed" 2>/dev/null || true
     echo ""
-    echo "   Web UI:   http://localhost:3000"
-    echo "   API:      http://localhost:3001"
+    echo "   Web UI:   http://localhost:5173"
+    echo "   API:      http://localhost:3000"
     echo "   Login:    admin / Admin@1234!"
     echo ""
     ;;

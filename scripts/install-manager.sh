@@ -127,8 +127,8 @@ fi
 
 # Port — single port for both web and API
 echo ""
-read -p "Port (default: 3001): " APP_PORT < /dev/tty
-APP_PORT=${APP_PORT:-3001}
+read -p "Port (default: 3000): " APP_PORT < /dev/tty
+APP_PORT=${APP_PORT:-3000}
 
 # Build full URL (used by VPN agents to connect to manager API)
 if [[ "$SERVER_DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

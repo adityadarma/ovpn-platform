@@ -205,9 +205,6 @@ jobs:
           # Set test JWT secret
           sed -i 's/CHANGE_ME_TO_SECURE_RANDOM_STRING_MIN_32_CHARS/test-secret-key-for-ci-testing-only-32chars/' .env
           
-          # Set WEB_URL for CORS
-          sed -i 's|WEB_URL=http://localhost:3000|WEB_URL=http://localhost:3000|' .env
-          
           # Add VPN_TOKEN
           echo "VPN_TOKEN=test-vpn-token-for-ci" >> .env
       
@@ -245,7 +242,7 @@ jobs:
           echo "Waiting for services to be ready..."
           for i in {1..24}; do
             # Check if API is responding
-            if curl -f http://localhost:3001/api/v1/health 2>/dev/null; then
+            if curl -f http://localhost:3000/api/v1/health 2>/dev/null; then
               echo "API is ready!"
               break
             fi
@@ -256,7 +253,7 @@ jobs:
       - name: Check service health
         run: |
           echo "Testing API health endpoint..."
-          curl -v http://localhost:3001/api/v1/health || exit 1
+          curl -v http://localhost:3000/api/v1/health || exit 1
           
           echo "Testing Web UI..."
           curl -v http://localhost:3000 || exit 1

@@ -67,7 +67,7 @@ services:
     command: sh -c "apk add --no-cache python3 make g++ && npm install -g pnpm && pnpm install && pnpm --filter @vpn/api dev"
     environment:
       NODE_ENV: development
-      PORT: "3001"
+      PORT: "3000"
       # ⚠️  DEV ONLY: Weak secret for development
       JWT_SECRET: dev-secret-please-change-in-production-32chars
       JWT_EXPIRES_IN: 7d
@@ -78,7 +78,7 @@ services:
       DATABASE_SQLITE_PATH: /data/vpn.sqlite
       WEB_URL: ${WEB_URL:-http://localhost:3000}
     ports:
-      - "3001:3001"
+      - "3000:3000"
     volumes:
       - .:/app
       - api_dev_data:/data
@@ -92,11 +92,11 @@ services:
         condition: service_healthy
         required: false
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:3001/api/v1/health || exit 1" ]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:3000/api/v1/health || exit 1" ]
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 5m   # first run compiles better-sqlite3 from source (~3-4 min)
+      start_period: 5m # first run compiles better-sqlite3 from source (~3-4 min)
     networks:
       - vpn-dev-network
 
@@ -108,11 +108,11 @@ services:
     command: sh -c "apk add --no-cache python3 make g++ && npm install -g pnpm && pnpm install && pnpm --filter @vpn/web dev"
     environment:
       NODE_ENV: development
-      # In Docker, browser fetches go via host machine so localhost:3001 is correct
+      # In Docker, browser fetches go via host machine so localhost:3000 is correct
       # (Vite embeds this into the JS bundle at build time via import.meta.env)
-      VITE_API_URL: http://localhost:3001
+      VITE_API_URL: http://localhost:3000
     ports:
-      - "3000:5173"
+      - "5173:5173"
     volumes:
       - .:/app
       - pnpm_store:/root/.local/share/pnpm/store
@@ -133,7 +133,7 @@ services:
     command: sh -c "npm install -g pnpm && pnpm install && pnpm --filter @vpn/agent dev"
     environment:
       NODE_ENV: development
-      AGENT_MANAGER_URL: ${AGENT_MANAGER_URL:-http://localhost:3001}
+      AGENT_MANAGER_URL: ${AGENT_MANAGER_URL:-http://localhost:3000}
       AGENT_NODE_ID: ${AGENT_NODE_ID:-dev-node-1}
       AGENT_SECRET_TOKEN: ${AGENT_SECRET_TOKEN:-dev-token}
       VPN_TOKEN: ${VPN_TOKEN:-dev-vpn-token}

@@ -6,8 +6,8 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default fp(async (app) => {
-  // In production, Next.js static output is placed at /app/web
-  // In development, this plugin is not loaded (dev uses `next dev`)
+  // In production, Vite static output is placed at /app/web
+  // In development, this plugin is not loaded (dev uses Vite dev server)
   const webRoot = process.env['WEB_STATIC_PATH'] ?? path.resolve(__dirname, '../../../web')
 
   await app.register(fastifyStatic, {

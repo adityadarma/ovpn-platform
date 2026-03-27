@@ -35,7 +35,7 @@ A centralized, open-source VPN management inspired by enterprise solutions (like
 │           VPN Manager (Core)           │
 │  ┌──────────┐  ┌──────────────────────┐ │
 │  │  Web UI  │  │    API (Fastify)     │ │
-│  │ Next.js  │◄─│  TypeScript + Knex   │ │
+│  │ Vite SPA │◄─│  TypeScript + Knex   │ │
 │  └──────────┘  └──────────────────────┘ │
 │                         │               │
 │              ┌──────────┴──────────┐    │
@@ -81,8 +81,8 @@ For detailed architecture documentation, see [ARCHITECTURE.md](docs/ARCHITECTURE
 ```text
 vpn-manager/
 ├── apps/
-│   ├── api/        ← Fastify REST API (port 3001)
-│   ├── web/        ← Next.js + ShadCN Dashboard (port 3000)
+│   ├── api/        ← Fastify REST API (Dev port 3000)
+│   ├── web/        ← Vite SPA + ShadCN Dashboard (Dev port 5173)
 │   └── agent/      ← VPN node agent (standalone worker)
 ├── packages/
 │   ├── db/         ← Knex multi-database layer 

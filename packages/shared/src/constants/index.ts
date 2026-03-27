@@ -1,11 +1,5 @@
 export const APP_VERSION = '1.0.0'
 
-export const DEFAULT_PORT = {
-  API: 3001,
-  WEB: 3000,
-  AGENT: 3002,
-} as const
-
 export const AGENT = {
   POLL_INTERVAL_MS: 5_000,
   HEARTBEAT_INTERVAL_MS: 30_000,

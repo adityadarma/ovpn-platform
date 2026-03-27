@@ -1,9 +1,9 @@
 # ============================================================
 # Combined Web + API Dockerfile (CSR static + Fastify)
 # ============================================================
-# Next.js is built as static files (CSR, output: 'export').
+# Vite SPA is built as static files.
 # Fastify serves both the API and the static web files.
-# Single process, single port (3001).
+# Single process, single port (3000).
 # ============================================================
 
 FROM node:24-alpine AS base
@@ -73,7 +73,7 @@ RUN addgroup -g 1001 -S nodejs && adduser -S apiuser -u 1001
 COPY --from=builder --chown=apiuser:nodejs /prod/api /app/api
 RUN chmod +x /app/api/start.sh
 
-# Copy Next.js static build (served by Fastify via @fastify/static)
+# Copy Vite static build (served by Fastify via @fastify/static)
 COPY --from=builder --chown=apiuser:nodejs /prod/web /app/web
 
 # Create data directory for SQLite
@@ -86,11 +86,11 @@ ENV NODE_ENV=production
 ENV WEB_STATIC_PATH=/app/web
 
 # Expose single port — Fastify serves both API and web
-EXPOSE 3001
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/api/v1/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/health || exit 1
 
 # Single entrypoint — the start.sh runs migrations then starts Fastify
 CMD ["/app/api/start.sh"]

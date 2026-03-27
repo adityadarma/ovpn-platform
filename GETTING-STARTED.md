@@ -30,7 +30,7 @@ Install everything (Manager + VPN Node) on one server.
 - Linux server (Ubuntu 20.04+, Debian 11+, CentOS 8+)
 - Docker & Docker Compose v2
 - Root/sudo access
-- Open ports: 3000 (Web UI), 3001 (API), 1194 (OpenVPN UDP)
+- Open ports: 5173 (Web UI), 3000 (API), 1194 (OpenVPN UDP)
 
 ### Install
 
@@ -55,7 +55,7 @@ The script will:
 ### Access
 
 ```
-Web UI: http://YOUR_SERVER_IP:3000
+Web UI: http://YOUR_SERVER_IP:5173
 Login: admin / Admin@1234!
 ```
 
@@ -76,7 +76,7 @@ VPN Manager consists of API and Web UI. Install this first on a server.
 - Linux server (Ubuntu 20.04+, Debian 11+, CentOS 8+)
 - Docker & Docker Compose v2
 - Root/sudo access
-- Open ports: 3000 (Web UI), 3001 (API)
+- Open ports: 5173 (Web UI), 3000 (API)
 
 #### Install Manager
 
