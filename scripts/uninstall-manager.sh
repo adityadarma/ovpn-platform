@@ -162,7 +162,7 @@ remove_volumes() {
     if [ "$delete_data" = "yes" ]; then
         print_info "Removing Docker volumes..."
         
-        docker volume rm vpn-manager_api_data 2>/dev/null || true
+        docker volume rm vpn-manager_manager_data 2>/dev/null || true
         docker volume rm vpn-manager_postgres_data 2>/dev/null || true
         docker volume rm vpn-manager_mariadb_data 2>/dev/null || true
         
