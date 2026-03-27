@@ -14,8 +14,6 @@ export default fp(async (app) => {
     root: webRoot,
     // Serve static assets (JS, CSS, images) without prefix
     prefix: '/',
-    // Don't decorate reply — we'll handle fallback manually
-    decorateReply: false,
   })
 
   // SPA fallback: all non-API, non-asset routes → index.html
