@@ -206,7 +206,100 @@ update_openvpn_config() {
     # Ensure CCD directory exists (used by kick_vpn_session to write disable files)
     mkdir -p /etc/openvpn/ccd
     chmod 755 /etc/openvpn/ccd
-    
+
+    # ── Create client-connect script ─────────────────────────────────────────
+    # OpenVPN calls this with environment vars set (IV_PLAT, IV_VER, IV_UI_VER,
+    # common_name, ifconfig_pool_remote_ip, trusted_ip, etc.) so we can capture
+    # real device name/platform at connect time.
+    cat > /etc/openvpn/server/client-connect.sh <<'SCRIPT'
+#!/bin/bash
+# OpenVPN client-connect hook
+# Reads VPN token + manager URL from agent .env
+AGENT_ENV="/opt/vpn-agent/.env"
+if [ -f "$AGENT_ENV" ]; then
+    source "$AGENT_ENV"
+fi
+
+MANAGER_URL="${AGENT_MANAGER_URL:-}"
+TOKEN="${VPN_TOKEN:-}"
+NODE_ID="${AGENT_NODE_ID:-}"
+
+if [ -z "$MANAGER_URL" ] || [ -z "$TOKEN" ] || [ -z "$NODE_ID" ]; then
+    echo "[client-connect] Missing AGENT_MANAGER_URL / VPN_TOKEN / AGENT_NODE_ID — skipping" >&2
+    exit 0
+fi
+
+# Build device_name from IV_UI_VER (e.g. "OpenVPN_GUI_11.28" → "OpenVPN GUI 11.28")
+# or fall back to IV_PLAT (platform) + IV_VER (version)
+if [ -n "$IV_UI_VER" ]; then
+    DEVICE_NAME=$(echo "$IV_UI_VER" | tr '_' ' ')
+elif [ -n "$IV_PLAT" ]; then
+    PLATFORM_MAP_win="Windows"
+    PLATFORM_MAP_mac="macOS"
+    PLATFORM_MAP_linux="Linux"
+    PLATFORM_MAP_android="Android"
+    PLATFORM_MAP_ios="iOS"
+    PLAT_VAR="PLATFORM_MAP_${IV_PLAT}"
+    PLATFORM="${!PLAT_VAR:-$IV_PLAT}"
+    DEVICE_NAME="$PLATFORM${IV_VER:+ (OpenVPN $IV_VER)}"
+else
+    DEVICE_NAME=""
+fi
+
+# client_version from IV_VER
+CLIENT_VERSION="${IV_VER:-}"
+
+curl -s -m 5 -X POST "$MANAGER_URL/api/v1/vpn/connect" \
+    -H "Content-Type: application/json" \
+    -H "X-VPN-Token: $TOKEN" \
+    -d "{
+        \"username\": \"$common_name\",
+        \"vpn_ip\": \"$ifconfig_pool_remote_ip\",
+        \"real_ip\": \"$trusted_ip\",
+        \"node_id\": \"$NODE_ID\",
+        \"device_name\": \"$DEVICE_NAME\",
+        \"client_version\": \"$CLIENT_VERSION\",
+        \"common_name\": \"$common_name\"
+    }" > /dev/null 2>&1 || true
+
+exit 0
+SCRIPT
+    chmod +x /etc/openvpn/server/client-connect.sh
+    ok "client-connect script created"
+
+    # ── Create client-disconnect script ──────────────────────────────────────
+    cat > /etc/openvpn/server/client-disconnect.sh <<'SCRIPT'
+#!/bin/bash
+# OpenVPN client-disconnect hook
+AGENT_ENV="/opt/vpn-agent/.env"
+if [ -f "$AGENT_ENV" ]; then
+    source "$AGENT_ENV"
+fi
+
+MANAGER_URL="${AGENT_MANAGER_URL:-}"
+TOKEN="${VPN_TOKEN:-}"
+NODE_ID="${AGENT_NODE_ID:-}"
+
+if [ -z "$MANAGER_URL" ] || [ -z "$TOKEN" ] || [ -z "$NODE_ID" ]; then
+    exit 0
+fi
+
+curl -s -m 5 -X POST "$MANAGER_URL/api/v1/vpn/disconnect" \
+    -H "Content-Type: application/json" \
+    -H "X-VPN-Token: $TOKEN" \
+    -d "{
+        \"username\": \"$common_name\",
+        \"node_id\": \"$NODE_ID\",
+        \"bytes_sent\": ${bytes_sent:-0},
+        \"bytes_received\": ${bytes_received:-0},
+        \"disconnect_reason\": \"normal\"
+    }" > /dev/null 2>&1 || true
+
+exit 0
+SCRIPT
+    chmod +x /etc/openvpn/server/client-disconnect.sh
+    ok "client-disconnect script created"
+
     # Create new config based on working reference
     cat > /etc/openvpn/server/server.conf <<'EOF'
 port 1194
@@ -243,13 +336,17 @@ persist-tun
 user nobody
 group nogroup
 
-
 status /var/log/openvpn/status.log 1
 status-version 3
 log /var/log/openvpn/openvpn.log
 verb 3
 
+# Allow scripts to run (needed for client-connect/disconnect hooks)
 script-security 2
+
+# Hooks — capture device info (IV_PLAT, IV_VER, IV_UI_VER) at connect time
+client-connect  /etc/openvpn/server/client-connect.sh
+client-disconnect /etc/openvpn/server/client-disconnect.sh
 
 # Management Interface
 management /run/openvpn/server.sock unix
