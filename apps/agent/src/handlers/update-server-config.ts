@@ -13,6 +13,9 @@ interface UpdateServerConfigParams {
   cipher: string
   keepalive_ping: number
   keepalive_timeout: number
+  // Raw push directives (one per line) — appended after standard DNS block.
+  // Each line is automatically wrapped with push "..." unless already starting with 'push '.
+  custom_push_directives?: string
 }
 
 export async function handleUpdateServerConfig(params: Record<string, unknown>, driver: VpnDriver): Promise<Record<string, unknown>> {
@@ -44,6 +47,12 @@ export async function handleUpdateServerConfig(params: Record<string, unknown>, 
   const customRoutes = config.push_routes 
     ? config.push_routes.split(',').map(r => r.trim()).filter(Boolean)
     : []
+
+  // Parse custom push directives (textarea, one per line)
+  const customPushLines = (config.custom_push_directives ?? '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
 
   try {
     // Backup current config
@@ -77,6 +86,19 @@ topology subnet
     dnsArray.forEach(dns => {
       newConfig += `push "dhcp-option DNS ${dns}"\n`
     })
+
+    // Custom push directives — written verbatim after the standard DNS block
+    // Each line is auto-wrapped in push "..." unless it already starts with 'push '
+    if (customPushLines.length > 0) {
+      newConfig += `\n# Custom Push Directives\n`
+      customPushLines.forEach(line => {
+        if (line.startsWith('push ')) {
+          newConfig += `${line}\n`
+        } else {
+          newConfig += `push "${line}"\n`
+        }
+      })
+    }
 
     newConfig += `
 # Tunnel Mode: ${tunnelMode}

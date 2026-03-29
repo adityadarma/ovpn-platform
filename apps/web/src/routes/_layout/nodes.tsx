@@ -32,6 +32,7 @@ interface NodeConfig {
   keepalive_ping: number
   keepalive_timeout: number
   max_clients: number
+  custom_push_directives: string
 }
 
 interface RegisterResponse extends VpnNode {
@@ -62,6 +63,7 @@ function NodesPage() {
     keepalive_ping: 10,
     keepalive_timeout: 120,
     max_clients: 100,
+    custom_push_directives: '',
   })
 
   const { data: nodes = [], isLoading } = useQuery<VpnNode[]>({
@@ -289,21 +291,19 @@ function NodesPage() {
                 {/* Status & Hostname */}
                 <div className="flex items-start justify-between mb-4 ml-7">
                   <div className="flex items-center gap-2.5">
-                    <div className={`w-2.5 h-2.5 rounded-full mt-0.5 ${
-                      node.status === 'online' ? 'bg-emerald-500 shadow-sm shadow-emerald-200' : 'bg-gray-300'
-                    }`} />
+                    <div className={`w-2.5 h-2.5 rounded-full mt-0.5 ${node.status === 'online' ? 'bg-emerald-500 shadow-sm shadow-emerald-200' : 'bg-gray-300'
+                      }`} />
                     <div>
                       <p className="font-semibold text-gray-900">{node.hostname}</p>
                       <p className="text-xs font-mono text-gray-400 mt-0.5">{node.ip_address}</p>
                     </div>
                   </div>
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                    node.status === 'online'
+                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${node.status === 'online'
                       ? 'bg-emerald-50 text-emerald-700'
                       : node.status === 'offline'
                         ? 'bg-red-50 text-red-600'
                         : 'bg-amber-50 text-amber-600'
-                  }`}>
+                    }`}>
                     {node.status}
                   </span>
                 </div>
@@ -322,7 +322,7 @@ function NodesPage() {
                   )}
                   {node.last_seen && (
                     <div className="flex items-center gap-2" >
-                      <Clock className="h-3.5 w-3.5 text-gray-300" /> 
+                      <Clock className="h-3.5 w-3.5 text-gray-300" />
                       Last seen {new Date(node.last_seen).toLocaleString()}
                     </div>
                   )}
@@ -640,7 +640,30 @@ function NodesPage() {
                   placeholder="8.8.8.8,1.1.1.1"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
-                <p className="text-xs text-gray-400 mt-1">Comma-separated DNS server IPs</p>
+                <p className="text-xs text-gray-400 mt-1">Comma-separated DNS server IPs (generates <code className="bg-gray-100 px-1 rounded">push "dhcp-option DNS ...</code>)</p>
+              </div>
+
+              {/* Custom Push Directives */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-medium text-gray-700">Custom Push Directives</label>
+                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">Optional</span>
+                </div>
+                <textarea
+                  value={nodeConfig.custom_push_directives}
+                  onChange={e => setNodeConfig({ ...nodeConfig, custom_push_directives: e.target.value })}
+                  rows={5}
+                  placeholder={`dhcp-option DNS 172.31.6.140\ndhcp-option DOMAIN corp.internal\ndhcp-option DOMAIN internal.example.com\nDNS 94.140.14.14\nroute 172.31.0.0 255.255.0.0`}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono resize-y"
+                />
+                <div className="mt-1.5 space-y-0.5">
+                  <p className="text-xs text-gray-400">One directive per line — prepended with <code className="bg-gray-100 px-1 rounded">push "..."</code> automatically.</p>
+                  <p className="text-xs text-gray-400">These are appended <em>after</em> the DNS Servers above. Both fields can be used together.</p>
+                  <p className="text-xs text-amber-600 mt-1">Example:</p>
+                  <pre className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1.5 font-mono">{`dhcp-option DNS 172.31.6.140
+dhcp-option DOMAIN corp.internal
+route 172.31.0.0 255.255.0.0`}</pre>
+                </div>
               </div>
 
               <div>

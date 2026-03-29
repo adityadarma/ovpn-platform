@@ -78,19 +78,20 @@ function parseServerConfig(content: string): Record<string, any> {
     auth: 'SHA256',
     vpnNetwork: '10.8.0.0',
     vpnNetmask: '255.255.255.0',
-    dnsServers: '8.8.8.8,1.1.1.1',
+    dnsServers: '',
     pushRoutes: '',
+    customPushDirectives: '',
     compression: 'none',
     keepalivePing: 10,
     keepaliveTimeout: 120,
     maxClients: 100,
-    tunnelMode: 'full' // default to full tunnel
+    tunnelMode: 'full'
   }
+
+  const customLines: string[] = []
 
   for (const line of lines) {
     const trimmed = line.trim()
-    
-    // Skip comments and empty lines
     if (!trimmed || trimmed.startsWith('#')) continue
 
     const parts = trimmed.split(/\s+/)
@@ -100,66 +101,54 @@ function parseServerConfig(content: string): Record<string, any> {
       case 'port':
         config.port = parseInt(parts[1], 10)
         break
-      
       case 'proto':
         config.protocol = parts[1]
         break
-      
       case 'cipher':
         config.cipher = parts[1]
         break
-      
       case 'auth':
         config.auth = parts[1]
         break
-      
       case 'server':
         config.vpnNetwork = parts[1]
         config.vpnNetmask = parts[2]
         break
-      
-      case 'push':
-        const pushArg = parts.slice(1).join(' ').replace(/"/g, '')
-        
-        if (pushArg.includes('dhcp-option DNS')) {
-          const dns = pushArg.split('DNS')[1].trim()
-          if (!config.dnsServers) {
-            config.dnsServers = dns
-          } else if (!config.dnsServers.includes(dns)) {
-            config.dnsServers += `,${dns}`
-          }
-        } else if (pushArg.includes('route ')) {
-          const route = pushArg.replace('route ', '').trim()
-          if (config.pushRoutes) {
-            config.pushRoutes += `,${route}`
-          } else {
-            config.pushRoutes = route
-          }
-        } else if (pushArg.includes('redirect-gateway')) {
+      case 'push': {
+        // Strip outer quotes: push "dhcp-option DNS 1.1.1.1" → dhcp-option DNS 1.1.1.1
+        const pushArg = parts.slice(1).join(' ').replace(/^"|"$/g, '')
+        if (pushArg.startsWith('dhcp-option DNS ')) {
+          const dns = pushArg.slice('dhcp-option DNS '.length).trim()
+          config.dnsServers = config.dnsServers ? `${config.dnsServers},${dns}` : dns
+        } else if (pushArg.startsWith('route ')) {
+          const route = pushArg.slice('route '.length).trim()
+          config.pushRoutes = config.pushRoutes ? `${config.pushRoutes},${route}` : route
+        } else if (pushArg.startsWith('redirect-gateway')) {
           config.tunnelMode = 'full'
+        } else {
+          // Any other push directive → custom
+          customLines.push(pushArg)
         }
         break
-      
+      }
       case 'comp-lzo':
         config.compression = parts[1] || 'lzo'
         break
-      
       case 'compress':
         config.compression = parts[1] || 'lz4-v2'
         break
-      
       case 'keepalive':
         config.keepalivePing = parseInt(parts[1], 10)
         config.keepaliveTimeout = parseInt(parts[2], 10)
         break
-      
       case 'max-clients':
         config.maxClients = parseInt(parts[1], 10)
         break
     }
   }
 
-  // Determine tunnel mode based on push routes
+  config.customPushDirectives = customLines.join('\n')
+
   if (!content.includes('redirect-gateway') && config.pushRoutes) {
     config.tunnelMode = 'split'
   }

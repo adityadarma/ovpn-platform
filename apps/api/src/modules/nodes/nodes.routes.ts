@@ -16,6 +16,7 @@ interface NodeConfig {
   keepalive_ping: number
   keepalive_timeout: number
   max_clients: number
+  custom_push_directives?: string
 }
 
 const nodeRoutes: FastifyPluginAsync = async (app) => {
@@ -188,6 +189,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         keepalive_ping: config.keepalive_ping,
         keepalive_timeout: config.keepalive_timeout,
         max_clients: config.max_clients,
+        custom_push_directives: config.custom_push_directives ?? '',
       }
     },
   )
@@ -217,6 +219,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
         keepalive_ping: config.keepalive_ping,
         keepalive_timeout: config.keepalive_timeout,
         max_clients: config.max_clients,
+        custom_push_directives: config.custom_push_directives ?? null,
       })
 
       // Create task to update server config
@@ -618,6 +621,7 @@ const nodeRoutes: FastifyPluginAsync = async (app) => {
             keepalive_timeout: config.keepaliveTimeout,
             max_clients: config.maxClients,
             tunnel_mode: config.tunnelMode,
+            custom_push_directives: (config as any).customPushDirectives ?? null,
             last_seen: new Date()
           })
 
