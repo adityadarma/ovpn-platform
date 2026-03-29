@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { CreateUserSchema, UpdateUserSchema } from '@vpn/shared'
+import { nextAvailableIp, getNetmask } from '../../services/ip-pool.service'
 
 const userRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/users
@@ -9,7 +10,14 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     '/users',
     { onRequest: [app.authenticate], schema: { tags: ['users'], summary: 'List all VPN users', security: [{ bearerAuth: [] }] } },
     async () => {
-      return app.db('users').select('id', 'username', 'email', 'role', 'is_active', 'last_login', 'created_at', 'updated_at')
+      return app.db('users as u')
+        .leftJoin('groups as g', 'u.vpn_group_id', 'g.id')
+        .select(
+          'u.id', 'u.username', 'u.email', 'u.role', 'u.is_active',
+          'u.vpn_ip', 'u.vpn_group_id',
+          'g.name as vpn_group_name', 'g.vpn_subnet',
+          'u.last_login', 'u.created_at', 'u.updated_at',
+        )
     },
   )
 
@@ -33,6 +41,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     { onRequest: [app.authenticateAdmin], schema: { tags: ['users'], summary: 'Create a new VPN user', security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       const input = CreateUserSchema.parse(request.body)
+      const vpnGroupId = (request.body as any).vpn_group_id as string | undefined
 
       const existing = await app.db('users').where({ username: input.username }).first()
       if (existing) {
@@ -40,8 +49,27 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const passwordHash = await bcrypt.hash(input.password, 10)
-
       const id = crypto.randomUUID()
+
+      // --- Auto-assign VPN IP from group subnet ---
+      let vpnIp: string | null = null
+      let resolvedGroupId: string | null = vpnGroupId ?? null
+
+      if (vpnGroupId) {
+        const group = await app.db('groups').where({ id: vpnGroupId }).first()
+        if (!group) return reply.status(400).send({ error: 'vpn_group_id not found' })
+
+        if (group.vpn_subnet) {
+          const usedIps = await app.db('users').whereNotNull('vpn_ip').pluck('vpn_ip') as string[]
+          vpnIp = nextAvailableIp(group.vpn_subnet, usedIps)
+          if (!vpnIp) {
+            return reply.status(422).send({
+              error: 'Subnet full',
+              message: `Group "${group.name}" subnet ${group.vpn_subnet} has no available IPs`,
+            })
+          }
+        }
+      }
 
       await app.db('users').insert({
         id,
@@ -50,11 +78,28 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         password: passwordHash,
         role: input.role ?? 'user',
         is_active: true,
+        vpn_ip: vpnIp,
+        vpn_group_id: resolvedGroupId,
       })
 
-      const user = await app.db('users')
-        .select('id', 'username', 'email', 'role', 'is_active', 'created_at')
-        .where({ id })
+      // Also add to user_groups table if group was specified
+      if (resolvedGroupId) {
+        await app.db('user_groups')
+          .insert({ group_id: resolvedGroupId, user_id: id })
+          .onConflict(['group_id', 'user_id']).ignore()
+      }
+
+      // Enqueue write_client_ccd task to all online nodes (if IP was assigned)
+      if (vpnIp && resolvedGroupId) {
+        const group = await app.db('groups').where({ id: resolvedGroupId }).first()
+        const netmask = group?.vpn_subnet ? getNetmask(group.vpn_subnet) : '255.255.255.0'
+        await enqueueCcdTask(app, input.username, vpnIp, netmask)
+      }
+
+      const user = await app.db('users as u')
+        .leftJoin('groups as g', 'u.vpn_group_id', 'g.id')
+        .select('u.id', 'u.username', 'u.email', 'u.role', 'u.is_active', 'u.vpn_ip', 'u.vpn_group_id', 'g.name as vpn_group_name', 'u.created_at')
+        .where('u.id', id)
         .first()
 
       return reply.status(201).send(user)
@@ -67,16 +112,16 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     { onRequest: [app.authenticateAdmin], schema: { tags: ['users'], summary: 'Update a VPN user', security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       const input = UpdateUserSchema.parse(request.body)
+      const vpnGroupId = (request.body as any).vpn_group_id as string | null | undefined
       const { id } = request.params
 
       const user = await app.db('users').where({ id }).first()
       if (!user) return reply.status(404).send({ error: 'Not Found', message: 'User not found' })
 
-      // Username cannot be changed (it's used as certificate CN)
       if (input.username && input.username !== user.username) {
-        return reply.status(400).send({ 
-          error: 'Bad Request', 
-          message: 'Username cannot be changed after creation' 
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Username cannot be changed after creation',
         })
       }
 
@@ -91,8 +136,54 @@ const userRoutes: FastifyPluginAsync = async (app) => {
         updates['password'] = await bcrypt.hash(input.password, 10)
       }
 
+      // Handle group change → reassign VPN IP
+      if (vpnGroupId !== undefined) {
+        if (vpnGroupId === null) {
+          // Remove from group
+          updates['vpn_group_id'] = null
+          updates['vpn_ip'] = null
+        } else if (vpnGroupId !== user.vpn_group_id) {
+          // Moving to a different group
+          const newGroup = await app.db('groups').where({ id: vpnGroupId }).first()
+          if (!newGroup) return reply.status(400).send({ error: 'vpn_group_id not found' })
+
+          if (newGroup.vpn_subnet) {
+            const usedIps = await app.db('users')
+              .whereNotNull('vpn_ip')
+              .whereNot({ id }) // exclude current user so they can keep a slot
+              .pluck('vpn_ip') as string[]
+
+            const newIp = nextAvailableIp(newGroup.vpn_subnet, usedIps)
+            if (!newIp) {
+              return reply.status(422).send({
+                error: 'Subnet full',
+                message: `Group "${newGroup.name}" subnet ${newGroup.vpn_subnet} has no available IPs`,
+              })
+            }
+            updates['vpn_ip'] = newIp
+            updates['vpn_group_id'] = vpnGroupId
+
+            // Update user_groups membership
+            await app.db('user_groups').where({ user_id: id }).delete()
+            await app.db('user_groups')
+              .insert({ group_id: vpnGroupId, user_id: id })
+              .onConflict(['group_id', 'user_id']).ignore()
+
+            // Enqueue CCD update
+            const netmask = getNetmask(newGroup.vpn_subnet)
+            await enqueueCcdTask(app, user.username, newIp, netmask)
+          } else {
+            updates['vpn_group_id'] = vpnGroupId
+          }
+        }
+      }
+
       await app.db('users').where({ id }).update(updates)
-      return app.db('users').select('id', 'username', 'email', 'role', 'is_active', 'updated_at').where({ id }).first()
+      return app.db('users as u')
+        .leftJoin('groups as g', 'u.vpn_group_id', 'g.id')
+        .select('u.id', 'u.username', 'u.email', 'u.role', 'u.is_active', 'u.vpn_ip', 'u.vpn_group_id', 'g.name as vpn_group_name', 'u.updated_at')
+        .where('u.id', id)
+        .first()
     },
   )
 
@@ -692,6 +783,36 @@ ${node.ta_key.trim()}
       return reply.status(204).send()
     },
   )
+}
+
+/**
+ * Enqueue a write_client_ccd task to all online VPN nodes.
+ * This ensures the CCD file with ifconfig-push is written on every node
+ * that has the user's certificates.
+ */
+async function enqueueCcdTask(
+  app: any,
+  username: string,
+  vpnIp: string,
+  netmask: string,
+): Promise<void> {
+  const onlineNodes = await app.db('vpn_nodes').where({ status: 'online' }).select('id')
+  if (onlineNodes.length === 0) {
+    app.log.warn(`[ip-pool] No online nodes to enqueue write_client_ccd for ${username}`)
+    return
+  }
+
+  const tasks = onlineNodes.map((node: { id: string }) => ({
+    id: crypto.randomUUID(),
+    node_id: node.id,
+    action: 'write_client_ccd',
+    payload: JSON.stringify({ username, vpn_ip: vpnIp, netmask }),
+    status: 'pending',
+    created_at: new Date(),
+  }))
+
+  await app.db('tasks').insert(tasks)
+  app.log.info(`[ip-pool] Queued write_client_ccd for ${username} → ${vpnIp} on ${tasks.length} node(s)`)
 }
 
 export default userRoutes

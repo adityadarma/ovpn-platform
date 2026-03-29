@@ -48,13 +48,14 @@ interface Group {
   id: string
   name: string
   description: string | null
+  vpn_subnet: string | null
   member_count: number
   network_count: number
   created_at: string
 }
 
 interface GroupDetail extends Group {
-  members: Array<{ id: string; username: string; email: string | null; role: string; is_active: boolean }>
+  members: Array<{ id: string; username: string; email: string | null; role: string; is_active: boolean; vpn_ip: string | null }>
   networks: Array<{ id: string; name: string; cidr: string }>
 }
 
@@ -73,14 +74,14 @@ interface NetworkItem {
   description: string | null
 }
 
-interface FormState { name: string; description: string }
+interface FormState { name: string; description: string; vpn_subnet: string }
 
 function GroupsPage() {
   const qc = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
   const [editGroup, setEditGroup] = useState<Group | null>(null)
   const [detailGroup, setDetailGroup] = useState<string | null>(null)
-  const [form, setForm] = useState<FormState>({ name: '', description: '' })
+  const [form, setForm] = useState<FormState>({ name: '', description: '', vpn_subnet: '' })
   const [showAddMember, setShowAddMember] = useState(false)
   const [showAddNetwork, setShowAddNetwork] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
@@ -113,7 +114,7 @@ function GroupsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['groups'] })
       setShowCreate(false)
-      setForm({ name: '', description: '' })
+      setForm({ name: '', description: '', vpn_subnet: '' })
       toast.success('Group created successfully')
     },
     onError: (e: Error) => toast.error(e.message),
@@ -223,7 +224,7 @@ function GroupsPage() {
 
   const openEdit = (g: Group) => {
     setEditGroup(g)
-    setForm({ name: g.name, description: g.description ?? '' })
+    setForm({ name: g.name, description: g.description ?? '', vpn_subnet: g.vpn_subnet ?? '' })
   }
 
   // Filter users that are not already in the group
@@ -259,7 +260,7 @@ function GroupsPage() {
               Delete ({selectedGroups.size})
             </Button>
           )}
-          <Button id="btn-create-group" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setShowCreate(true); setForm({ name: '', description: '' }) }}>
+          <Button id="btn-create-group" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => { setShowCreate(true); setForm({ name: '', description: '', vpn_subnet: '' }) }}>
             <Plus className="mr-2 h-4 w-4" />
             Add Group
           </Button>
@@ -295,6 +296,7 @@ function GroupsPage() {
                         />
                       </TableHead>
                       <TableHead>Name</TableHead>
+                      <TableHead>Subnet / IP Pool</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead className="text-center">Members</TableHead>
                       <TableHead className="text-center">Networks</TableHead>
@@ -316,6 +318,11 @@ function GroupsPage() {
                           />
                         </TableCell>
                         <TableCell className="font-medium" onClick={() => setDetailGroup(detailGroup === g.id ? null : g.id)}>{g.name}</TableCell>
+                        <TableCell onClick={() => setDetailGroup(detailGroup === g.id ? null : g.id)}>
+                          {g.vpn_subnet
+                            ? <code className="text-xs bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded">{g.vpn_subnet}</code>
+                            : <span className="text-muted-foreground text-xs">—</span>}
+                        </TableCell>
                         <TableCell className="text-muted-foreground text-sm" onClick={() => setDetailGroup(detailGroup === g.id ? null : g.id)}>{g.description ?? '—'}</TableCell>
                         <TableCell className="text-center" onClick={() => setDetailGroup(detailGroup === g.id ? null : g.id)}>
                           <Badge variant="secondary">{g.member_count}</Badge>
@@ -384,6 +391,11 @@ function GroupsPage() {
                           <p className="text-sm font-medium truncate">{m.username}</p>
                           <p className="text-xs text-muted-foreground truncate">{m.email ?? '—'}</p>
                         </div>
+                        {m.vpn_ip && (
+                          <code className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded">
+                            {m.vpn_ip}
+                          </code>
+                        )}
                         <Badge variant={m.is_active ? 'default' : 'secondary'} className="text-xs">
                           {m.is_active ? 'active' : 'inactive'}
                         </Badge>
@@ -466,6 +478,17 @@ function GroupsPage() {
               />
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="group-subnet">VPN Subnet <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Input
+                id="group-subnet"
+                placeholder="e.g. 10.8.1.0/24"
+                value={form.vpn_subnet}
+                onChange={e => setForm(f => ({ ...f, vpn_subnet: e.target.value }))}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">Users in this group will be auto-assigned an IP from this subnet.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label htmlFor="group-desc">Description</Label>
               <Textarea
                 id="group-desc"
@@ -481,7 +504,7 @@ function GroupsPage() {
             <Button
               id="btn-create-group-submit"
               disabled={!form.name.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate(form)}
+              onClick={() => createMutation.mutate({ name: form.name, description: form.description, vpn_subnet: form.vpn_subnet || '' })}
             >
               {createMutation.isPending ? 'Adding...' : 'Add Group'}
             </Button>
@@ -505,6 +528,17 @@ function GroupsPage() {
               />
             </div>
             <div className="space-y-1.5">
+              <Label htmlFor="edit-group-subnet">VPN Subnet <span className="text-muted-foreground text-xs">(optional)</span></Label>
+              <Input
+                id="edit-group-subnet"
+                placeholder="e.g. 10.8.1.0/24"
+                value={form.vpn_subnet}
+                onChange={e => setForm(f => ({ ...f, vpn_subnet: e.target.value }))}
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground">Changing the subnet does not reassign existing user IPs.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label htmlFor="edit-group-desc">Description</Label>
               <Textarea
                 id="edit-group-desc"
@@ -519,7 +553,7 @@ function GroupsPage() {
             <Button
               id="btn-edit-group-submit"
               disabled={!form.name.trim() || updateMutation.isPending}
-              onClick={() => editGroup && updateMutation.mutate({ id: editGroup.id, data: form })}
+              onClick={() => editGroup && updateMutation.mutate({ id: editGroup.id, data: { name: form.name, description: form.description, vpn_subnet: form.vpn_subnet || '' } })}
             >
               {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
             </Button>

@@ -14,6 +14,7 @@ export type TaskAction =
   | 'sync_server_config'
   | 'kick_vpn_session'
   | 'unkick_vpn_session'
+  | 'write_client_ccd'
 
 export interface Task {
   id: string
