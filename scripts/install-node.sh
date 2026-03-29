@@ -203,6 +203,10 @@ update_openvpn_config() {
         info "Backed up existing config"
     fi
     
+    # Ensure CCD directory exists (used by kick_vpn_session to write disable files)
+    mkdir -p /etc/openvpn/ccd
+    chmod 755 /etc/openvpn/ccd
+    
     # Create new config based on working reference
     cat > /etc/openvpn/server/server.conf <<'EOF'
 port 1194
@@ -218,6 +222,9 @@ tls-crypt /etc/openvpn/server/tls-crypt.key
 
 server 10.8.0.0 255.255.255.0
 topology subnet
+
+# Client Config Directory — allows per-client overrides (e.g. "disable" to block a kicked user)
+client-config-dir /etc/openvpn/ccd
 
 push "dhcp-option DNS 8.8.8.8"
 push "dhcp-option DNS 1.1.1.1"
