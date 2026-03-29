@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { execSync, execFileSync } from 'node:child_process'
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import path from 'node:path'
 import net from 'node:net'
 import type { VpnDriver } from '../drivers'
@@ -7,27 +7,26 @@ import type { VpnDriver } from '../drivers'
 /**
  * kick_vpn_session handler
  *
- * Payload: { common_name: string }
+ * Payload: { common_name: string; permanent?: boolean }
  *
- * Three-step approach:
- *  1. Write CCD `disable` file → blocks reconnect attempts at TLS handshake.
- *  2. Send `kill <cn>` to management socket via raw TCP/Unix socket write
- *     (bypasses the driver's async command queue which can misbehave under
- *     concurrent realtime events like >CLIENT:DISCONNECT).
- *  3. Fall back to driver.disconnectClient() if raw write fails.
+ * permanent = false (default) — Kick only:
+ *   Drops the current tunnel. User can reconnect normally after the
+ *   keepalive timeout (~10-120s depending on server config).
  *
- * CCD note: the /etc/openvpn/ccd directory MUST be:
- *  - Listed in server.conf as `client-config-dir /etc/openvpn/ccd`
- *  - Mounted into the agent container in docker-compose.agent.yml
+ * permanent = true — Kick & block:
+ *   Drops the current tunnel AND writes a CCD `disable` file so
+ *   OpenVPN rejects all future reconnect attempts for this client.
+ *   Requires server.conf: client-config-dir /etc/openvpn/ccd
+ *   To unkick, remove the file: rm /etc/openvpn/ccd/<username>
+ *   or call the unkick endpoint (if implemented).
  */
 
-const CCD_DIR = process.env['OPENVPN_CCD_DIR'] ?? '/etc/openvpn/ccd'
 const MGMT_SOCKET = process.env['OPENVPN_SOCKET_PATH'] ?? '/run/openvpn/server.sock'
+const CCD_DIR = process.env['OPENVPN_CCD_DIR'] ?? '/etc/openvpn/ccd'
 
-// ── Raw management socket kill ────────────────────────────────────────────────
-// Sends `kill <cn>` directly over the Unix socket without going through the
-// driver's shared command queue. This is more reliable when the queue is busy
-// or when concurrent realtime events (>CLIENT:DISCONNECT) are interleaved.
+// ── Raw management socket kill ─────────────────────────────────────────────
+// Opens a dedicated connection so it never conflicts with the driver's
+// async command queue when realtime events arrive concurrently.
 function killViaRawSocket(commonName: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = new net.Socket()
@@ -44,7 +43,6 @@ function killViaRawSocket(commonName: string): Promise<string> {
 
     socket.on('data', (chunk) => {
       response += chunk.toString()
-      // OpenVPN responds with SUCCESS: or ERROR: on the same line
       if (response.includes('SUCCESS:') || response.includes('ERROR:')) {
         clearTimeout(timeout)
         socket.destroy()
@@ -63,19 +61,64 @@ function killViaRawSocket(commonName: string): Promise<string> {
 
     socket.on('close', () => {
       clearTimeout(timeout)
-      if (!response.includes('SUCCESS:') && !response.includes('ERROR:')) {
-        // Socket closed before we got a response — treat as unknown
-        resolve(response.trim() || 'socket closed without response')
+      // Socket closed before SUCCESS/ERROR — usually means kill already fired
+      if (!response.includes('ERROR:')) {
+        resolve(response.trim() || 'socket closed after kill')
       }
     })
   })
+}
+
+// ── CCD helpers ────────────────────────────────────────────────────────────
+
+function writeCcdDisable(commonName: string): void {
+  try {
+    if (!existsSync(CCD_DIR)) {
+      require('node:fs').mkdirSync(CCD_DIR, { recursive: true })
+      console.log(`[kick-session] Created CCD directory: ${CCD_DIR}`)
+    }
+
+    const ccdFile = path.join(CCD_DIR, commonName)
+    let existing = ''
+    try { existing = readFileSync(ccdFile, 'utf-8') } catch { /* new file */ }
+
+    if (!existing.includes('disable')) {
+      const content = existing ? `${existing.trimEnd()}\ndisable\n` : 'disable\n'
+      writeFileSync(ccdFile, content, 'utf-8')
+      console.log(`[kick-session] ✓ CCD disable written: ${ccdFile}`)
+    } else {
+      console.log(`[kick-session] CCD disable already present: ${ccdFile}`)
+    }
+  } catch (err) {
+    console.error(`[kick-session] ✗ Failed to write CCD disable: ${(err as Error).message}`)
+    console.error('[kick-session]   Check that /etc/openvpn/ccd is mounted in docker-compose')
+  }
+}
+
+function removeCcdDisable(commonName: string): void {
+  try {
+    const ccdFile = path.join(CCD_DIR, commonName)
+    if (!existsSync(ccdFile)) return
+
+    const content = readFileSync(ccdFile, 'utf-8')
+    if (content.trim() === 'disable') {
+      unlinkSync(ccdFile)
+      console.log(`[kick-session] Removed leftover CCD disable: ${ccdFile}`)
+    } else if (content.includes('disable')) {
+      const cleaned = content.split('\n').filter(l => l.trim() !== 'disable').join('\n').trimEnd() + '\n'
+      writeFileSync(ccdFile, cleaned, 'utf-8')
+      console.log(`[kick-session] Removed disable line from CCD: ${ccdFile}`)
+    }
+  } catch (err) {
+    console.warn(`[kick-session] Could not remove CCD disable: ${(err as Error).message}`)
+  }
 }
 
 export async function handleKickSession(
   payload: Record<string, unknown>,
   driver: VpnDriver,
 ): Promise<Record<string, unknown>> {
-  const { common_name } = payload
+  const { common_name, permanent = false } = payload
 
   if (!common_name || typeof common_name !== 'string') {
     throw new Error('kick_vpn_session: common_name is required in payload')
@@ -84,47 +127,25 @@ export async function handleKickSession(
   const result: Record<string, unknown> = {
     kicked: false,
     common_name,
-    ccd_disabled: false,
+    permanent,
     kill_method: null,
     kill_response: null,
   }
 
-  // ── Step 1: Write CCD disable file ──────────────────────────────────────
-  // Prevents the client reconnecting after the kill. Requires:
-  //   - server.conf: client-config-dir /etc/openvpn/ccd
-  //   - docker-compose: /etc/openvpn/ccd:/etc/openvpn/ccd
-  try {
-    if (!existsSync(CCD_DIR)) {
-      mkdirSync(CCD_DIR, { recursive: true })
-      console.log(`[kick-session] Created CCD directory: ${CCD_DIR}`)
-    }
-
-    const ccdFile = path.join(CCD_DIR, common_name)
-    let existing = ''
-
-    try {
-      existing = readFileSync(ccdFile, 'utf-8')
-    } catch {
-      // File doesn't exist yet — that's fine
-    }
-
-    if (!existing.includes('disable')) {
-      const content = existing ? `${existing.trimEnd()}\ndisable\n` : 'disable\n'
-      writeFileSync(ccdFile, content, { encoding: 'utf-8' })
-      console.log(`[kick-session] ✓ CCD disable written: ${ccdFile}`)
-    } else {
-      console.log(`[kick-session] CCD disable already present for: ${common_name}`)
-    }
+  // ── CCD management ───────────────────────────────────────────────────────
+  if (permanent) {
+    // Write disable → blocks all future reconnects via TLS handshake rejection
+    writeCcdDisable(common_name)
     result.ccd_disabled = true
-  } catch (ccdErr) {
-    console.error(`[kick-session] ✗ CCD write failed: ${(ccdErr as Error).message}`)
-    console.error('[kick-session] Client may reconnect after kill — check mount and server.conf')
+  } else {
+    // Clean up any leftover disable from a previous permanent kick
+    // so the user can reconnect normally after this kick
+    removeCcdDisable(common_name)
   }
 
-  // ── Step 2: Kill tunnel via raw management socket ────────────────────────
-  // Preferred: bypasses driver's async queue entirely.
+  // ── Step 1: Raw socket kill (primary) ────────────────────────────────────
   try {
-    console.log(`[kick-session] Sending raw kill to management socket: ${MGMT_SOCKET}`)
+    console.log(`[kick-session] Sending kill via raw socket (permanent=${permanent}): ${MGMT_SOCKET}`)
     const response = await killViaRawSocket(common_name)
     console.log(`[kick-session] ✓ Raw socket kill response: ${response}`)
     result.kicked = true
@@ -136,7 +157,7 @@ export async function handleKickSession(
     console.warn('[kick-session] Falling back to driver.disconnectClient()...')
   }
 
-  // ── Step 3: Fallback — use driver's sendCommand ──────────────────────────
+  // ── Step 2: Driver fallback ───────────────────────────────────────────────
   if (driver.isConnected()) {
     try {
       await driver.disconnectClient(common_name)
@@ -147,35 +168,27 @@ export async function handleKickSession(
     } catch (driverErr) {
       console.error(`[kick-session] Driver kill failed: ${(driverErr as Error).message}`)
     }
+  } else {
+    console.warn('[kick-session] Driver not connected to management interface')
   }
 
-  // ── Step 4: Last resort — socat shell command ────────────────────────────
+  // ── Step 3: socat last resort ─────────────────────────────────────────────
   try {
-    console.warn('[kick-session] Trying socat shell fallback...')
-    const socat = execFileSync('which', ['socat'], { encoding: 'utf-8' }).trim()
-    if (socat) {
-      const output = execSync(
-        `printf 'kill ${common_name}\\r\\n' | socat - UNIX-CONNECT:${MGMT_SOCKET}`,
-        { encoding: 'utf-8', timeout: 5000 },
-      )
-      console.log(`[kick-session] ✓ socat kill output: ${output.trim()}`)
-      result.kicked = true
-      result.kill_method = 'socat'
-      result.kill_response = output.trim()
-      return result
-    }
+    console.warn('[kick-session] Trying socat fallback...')
+    const output = execSync(
+      `printf 'kill ${common_name}\\r\\n' | socat - UNIX-CONNECT:${MGMT_SOCKET}`,
+      { encoding: 'utf-8', timeout: 5000 },
+    )
+    console.log(`[kick-session] ✓ socat kill output: ${output.trim()}`)
+    result.kicked = true
+    result.kill_method = 'socat'
+    result.kill_response = output.trim()
+    return result
   } catch (socatErr) {
     console.error(`[kick-session] socat fallback failed: ${(socatErr as Error).message}`)
   }
 
-  // If we reach here, CCD disable is written (blocking reconnect) but kill
-  // of the current tunnel failed. Log clearly for debugging.
   console.error(`[kick-session] ✗ All kill methods failed for: ${common_name}`)
-  console.error(`[kick-session]   Management socket path: ${MGMT_SOCKET}`)
-  console.error(`[kick-session]   Driver connected: ${driver.isConnected()}`)
-  console.error('[kick-session]   Check agent logs and socket permissions')
-
-  // Return partial success — CCD is written, reconnect is blocked
-  result.kicked = false
+  console.error(`[kick-session]   Socket: ${MGMT_SOCKET} | Driver connected: ${driver.isConnected()}`)
   return result
 }

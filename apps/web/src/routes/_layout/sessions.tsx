@@ -1,14 +1,17 @@
-import { createFileRoute, useNavigate, Link } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_layout/sessions')({
   component: SessionsPage,
 })
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Activity, ArrowUp, ArrowDown, History, ChevronLeft, ChevronRight, Monitor, MapPin, UserX } from 'lucide-react'
+import {
+  Activity, ArrowUp, ArrowDown, History, ChevronLeft, ChevronRight,
+  Monitor, MapPin, UserX, ShieldOff, ShieldCheck, ChevronDown,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -43,7 +46,6 @@ function formatBytes(bytes: number) {
 }
 
 function formatDuration(since: string, until?: string | null, durationSeconds?: number) {
-  // If we have pre-calculated duration, use it
   if (durationSeconds !== undefined && durationSeconds !== null) {
     const m = Math.floor(durationSeconds / 60)
     const h = Math.floor(m / 60)
@@ -53,8 +55,6 @@ function formatDuration(since: string, until?: string | null, durationSeconds?: 
     if (m === 0) return '< 1m'
     return `${m}m`
   }
-  
-  // Otherwise calculate from timestamps
   const start = new Date(since).getTime()
   const end = until ? new Date(until).getTime() : Date.now()
   const ms = end - start
@@ -69,13 +69,117 @@ function formatDuration(since: string, until?: string | null, durationSeconds?: 
 
 function formatDateTime(date: string) {
   return new Date(date).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 }
 
+// ── KickDropdown ─────────────────────────────────────────────────────────────
+interface KickDropdownProps {
+  sessionId: string
+  username: string
+  onKick: (sessionId: string, permanent: boolean) => void
+  isPending: boolean
+}
+
+function KickDropdown({ sessionId, username, onKick, isPending }: KickDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="flex items-center">
+        {/* Main kick button */}
+        <button
+          onClick={() => {
+            if (confirm(`Disconnect ${username}?`)) onKick(sessionId, false)
+          }}
+          disabled={isPending}
+          title="Kick session"
+          className="h-8 px-2 flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-l-md border border-red-200 text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          <UserX className="h-3.5 w-3.5" />
+          Kick
+        </button>
+
+        {/* Dropdown arrow */}
+        <button
+          onClick={() => setOpen(o => !o)}
+          disabled={isPending}
+          className="h-8 px-1 flex items-center text-red-600 hover:text-red-700 hover:bg-red-50 rounded-r-md border border-l-0 border-red-200 transition-colors disabled:opacity-50"
+        >
+          <ChevronDown className="h-3 w-3" />
+        </button>
+      </div>
+
+      {open && (
+        <div className="absolute right-0 top-9 z-50 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 text-sm">
+          <button
+            className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+            onClick={() => {
+              setOpen(false)
+              if (confirm(`Disconnect ${username}?\n\nUser will be able to reconnect after.`)) {
+                onKick(sessionId, false)
+              }
+            }}
+          >
+            <UserX className="h-4 w-4 text-red-500" />
+            <div>
+              <div className="font-medium">Kick</div>
+              <div className="text-xs text-gray-400">Disconnect, allow reconnect</div>
+            </div>
+          </button>
+          <div className="my-1 border-t border-gray-100" />
+          <button
+            className="w-full text-left px-3 py-2 hover:bg-red-50 flex items-center gap-2 text-red-700"
+            onClick={() => {
+              setOpen(false)
+              if (confirm(`Permanently block ${username}?\n\nUser will NOT be able to reconnect until an admin unkicks them.`)) {
+                onKick(sessionId, true)
+              }
+            }}
+          >
+            <ShieldOff className="h-4 w-4 text-red-600" />
+            <div>
+              <div className="font-medium">Kick & Block</div>
+              <div className="text-xs text-red-400">Disconnect + block reconnect</div>
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── DisconnectReasonBadge ────────────────────────────────────────────────────
+function DisconnectReasonBadge({ reason }: { reason?: string }) {
+  if (!reason) return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Disconnected</span>
+
+  const map: Record<string, { label: string; className: string }> = {
+    normal:               { label: 'Disconnected',   className: 'bg-gray-100 text-gray-600' },
+    admin_kick:           { label: 'Kicked',          className: 'bg-red-100 text-red-700' },
+    admin_kick_permanent: { label: 'Blocked',         className: 'bg-red-200 text-red-800 font-semibold' },
+    timeout:              { label: 'Timeout',         className: 'bg-yellow-100 text-yellow-700' },
+    reconnect:            { label: 'Reconnected',     className: 'bg-blue-100 text-blue-700' },
+  }
+
+  const style = map[reason] ?? { label: reason, className: 'bg-gray-100 text-gray-600' }
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${style.className}`}>
+      {reason === 'admin_kick_permanent' && <ShieldOff className="h-3 w-3" />}
+      {style.label}
+    </span>
+  )
+}
+
+// ── Main Page ────────────────────────────────────────────────────────────────
 function SessionsPage() {
   const [page, setPage] = useState(1)
   const limit = 20
@@ -93,15 +197,28 @@ function SessionsPage() {
   })
 
   const kickMutation = useMutation({
-    mutationFn: (sessionId: string) => api.post(`/api/v1/sessions/${sessionId}/kick`, {}),
-    onSuccess: () => {
-      toast.success('Session kicked successfully')
+    mutationFn: ({ sessionId, permanent }: { sessionId: string; permanent: boolean }) =>
+      api.post(`/api/v1/sessions/${sessionId}/kick`, { permanent }),
+    onSuccess: (_data, { permanent }) => {
+      toast.success(permanent ? 'Session kicked and reconnection blocked' : 'Session kicked successfully')
       queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'history'] })
     },
-    onError: (e: Error) => {
-      toast.error(e.message || 'Failed to kick session')
-    },
+    onError: (e: Error) => toast.error(e.message || 'Failed to kick session'),
   })
+
+  const unkickMutation = useMutation({
+    mutationFn: (sessionId: string) => api.post(`/api/v1/sessions/${sessionId}/unkick`, {}),
+    onSuccess: () => {
+      toast.success('Reconnect access restored')
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'history'] })
+    },
+    onError: (e: Error) => toast.error(e.message || 'Failed to unkick session'),
+  })
+
+  const handleKick = (sessionId: string, permanent: boolean) => {
+    kickMutation.mutate({ sessionId, permanent })
+  }
 
   const history = historyData?.sessions || []
   const pagination = historyData?.pagination
@@ -164,9 +281,7 @@ function SessionsPage() {
                       <td className="px-5 py-4">
                         <div>
                           <div className="font-medium text-gray-900">{s.username}</div>
-                          {s.real_ip && (
-                            <div className="text-xs text-gray-400 font-mono">{s.real_ip}</div>
-                          )}
+                          {s.real_ip && <div className="text-xs text-gray-400 font-mono">{s.real_ip}</div>}
                         </div>
                       </td>
                       <td className="px-5 py-4">
@@ -174,9 +289,7 @@ function SessionsPage() {
                           <Monitor className="h-4 w-4 text-gray-400 mt-0.5" />
                           <div>
                             <div className="text-gray-700 text-xs">{s.device_name || 'Unknown'}</div>
-                            {s.client_version && (
-                              <div className="text-xs text-gray-400">{s.client_version}</div>
-                            )}
+                            {s.client_version && <div className="text-xs text-gray-400">{s.client_version}</div>}
                           </div>
                         </div>
                       </td>
@@ -195,15 +308,11 @@ function SessionsPage() {
                       <td className="px-5 py-4">
                         <div>
                           <div className="text-gray-700">{s.node_hostname}</div>
-                          {s.node_region && (
-                            <div className="text-xs text-gray-400">{s.node_region}</div>
-                          )}
+                          {s.node_region && <div className="text-xs text-gray-400">{s.node_region}</div>}
                         </div>
                       </td>
                       <td className="px-5 py-4 font-mono text-gray-600 text-xs">{s.vpn_ip}</td>
-                      <td className="px-5 py-4 text-gray-500" >
-                        {formatDuration(s.connected_at, null, s.duration_seconds)}
-                      </td>
+                      <td className="px-5 py-4 text-gray-500">{formatDuration(s.connected_at, null, s.duration_seconds)}</td>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2 text-xs">
                           <span className="flex items-center gap-1 text-blue-500">
@@ -221,19 +330,12 @@ function SessionsPage() {
                             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                             Connected
                           </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (confirm(`Disconnect ${s.username}?`)) {
-                                kickMutation.mutate(s.id)
-                              }
-                            }}
-                            disabled={kickMutation.isPending}
-                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <UserX className="h-4 w-4" />
-                          </Button>
+                          <KickDropdown
+                            sessionId={s.id}
+                            username={s.username}
+                            onKick={handleKick}
+                            isPending={kickMutation.isPending}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -276,9 +378,7 @@ function SessionsPage() {
                         <td className="px-5 py-4">
                           <div>
                             <div className="font-medium text-gray-900">{s.username}</div>
-                            {s.real_ip && (
-                              <div className="text-xs text-gray-400 font-mono">{s.real_ip}</div>
-                            )}
+                            {s.real_ip && <div className="text-xs text-gray-400 font-mono">{s.real_ip}</div>}
                           </div>
                         </td>
                         <td className="px-5 py-4">
@@ -286,18 +386,14 @@ function SessionsPage() {
                             <Monitor className="h-4 w-4 text-gray-400 mt-0.5" />
                             <div>
                               <div className="text-gray-700 text-xs">{s.device_name || 'Unknown'}</div>
-                              {s.client_version && (
-                                <div className="text-xs text-gray-400">{s.client_version}</div>
-                              )}
+                              {s.client_version && <div className="text-xs text-gray-400">{s.client_version}</div>}
                             </div>
                           </div>
                         </td>
                         <td className="px-5 py-4 text-gray-500">{s.node_hostname}</td>
                         <td className="px-5 py-4 font-mono text-gray-600 text-xs">{s.vpn_ip}</td>
-                        <td className="px-5 py-4 text-gray-500 text-xs" >
-                          {formatDateTime(s.connected_at)}
-                        </td>
-                        <td className="px-5 py-4 text-gray-500" >
+                        <td className="px-5 py-4 text-gray-500 text-xs">{formatDateTime(s.connected_at)}</td>
+                        <td className="px-5 py-4 text-gray-500">
                           {formatDuration(s.connected_at, s.disconnected_at, s.connection_duration_seconds)}
                         </td>
                         <td className="px-5 py-4">
@@ -312,23 +408,25 @@ function SessionsPage() {
                           </div>
                         </td>
                         <td className="px-5 py-4 text-right">
-                          {s.disconnect_reason ? (
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                              s.disconnect_reason === 'normal' ? 'bg-gray-100 text-gray-600' :
-                              s.disconnect_reason === 'admin_kick' ? 'bg-red-100 text-red-700' :
-                              s.disconnect_reason === 'timeout' ? 'bg-yellow-100 text-yellow-700' :
-                              'bg-gray-100 text-gray-600'
-                            }`}>
-                              {s.disconnect_reason === 'admin_kick' ? 'Kicked' :
-                               s.disconnect_reason === 'timeout' ? 'Timeout' :
-                               s.disconnect_reason === 'reconnect' ? 'Reconnected' :
-                               'Disconnected'}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                              {s.disconnected_at ? 'Disconnected' : 'Active'}
-                            </span>
-                          )}
+                          <div className="flex items-center justify-end gap-2">
+                            <DisconnectReasonBadge reason={s.disconnect_reason} />
+                            {/* Unkick button — only shown for permanently blocked sessions */}
+                            {s.disconnect_reason === 'admin_kick_permanent' && (
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Restore reconnect access for ${s.username}?\n\nThey will be able to connect to VPN again.`)) {
+                                    unkickMutation.mutate(s.id)
+                                  }
+                                }}
+                                disabled={unkickMutation.isPending}
+                                title="Restore reconnect access"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-full border border-emerald-200 transition-colors disabled:opacity-50"
+                              >
+                                <ShieldCheck className="h-3 w-3" />
+                                Unkick
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -346,12 +444,7 @@ function SessionsPage() {
                   )}
                 </p>
                 <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                  >
+                  <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
                     <ChevronLeft className="h-4 w-4 mr-1" />
                     Previous
                   </Button>

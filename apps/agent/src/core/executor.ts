@@ -12,6 +12,7 @@ import { handleUpdateServerConfig } from '../handlers/update-server-config'
 import { handleSyncCertificates } from '../handlers/sync-certificates'
 import { handleSyncServerConfig } from '../handlers/sync-server-config'
 import { handleKickSession } from '../handlers/kick-session'
+import { handleUnkickSession } from '../handlers/unkick-session'
 
 interface Task {
   id: string
@@ -33,6 +34,7 @@ const HANDLERS: Partial<Record<TaskAction, HandlerFn>> = {
   sync_certificates: handleSyncCertificates,
   sync_server_config: handleSyncServerConfig,
   kick_vpn_session: handleKickSession,
+  unkick_vpn_session: handleUnkickSession,
 }
 
 export async function executeTask(env: AgentEnv, task: Task, driver: VpnDriver): Promise<void> {

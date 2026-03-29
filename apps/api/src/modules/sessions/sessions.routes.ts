@@ -195,11 +195,26 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
   )
 
   // POST /api/v1/sessions/:id/kick  — admin kick user
-  app.post<{ Params: { id: string } }>(
+  // Body: { permanent?: boolean }  — if true, blocks reconnect via CCD disable
+  app.post<{ Params: { id: string }; Body: { permanent?: boolean } }>(
     '/sessions/:id/kick',
     { 
       onRequest: [app.authenticate],
-      schema: { tags: ['sessions'], summary: 'Kick active session (admin only)', security: [{ bearerAuth: [] }] },
+      schema: {
+        tags: ['sessions'],
+        summary: 'Kick active session (admin only)',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          properties: {
+            permanent: {
+              type: 'boolean',
+              description: 'If true, write CCD disable file to block reconnection permanently (until unkicked)',
+              default: false,
+            },
+          },
+        },
+      },
     },
     async (request, reply) => {
       // Check if user is admin
@@ -209,6 +224,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const { id } = request.params
+      const permanent = request.body?.permanent === true
       const adminUser = user
 
       const session = await app.db('vpn_sessions')
@@ -229,7 +245,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         .where({ id })
         .update({
           disconnected_at: now,
-          disconnect_reason: 'admin_kick',
+          disconnect_reason: permanent ? 'admin_kick_permanent' : 'admin_kick',
           connection_duration_seconds: durationSeconds,
         })
 
@@ -238,7 +254,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         id: crypto.randomUUID(),
         user_id: adminUser.id,
         username: adminUser.username,
-        action: 'session_kick',
+        action: permanent ? 'session_kick_permanent' : 'session_kick',
         resource_type: 'vpn_session',
         resource_id: id,
         session_id: id,
@@ -246,6 +262,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         metadata: JSON.stringify({
           kicked_user_id: session.user_id,
           node_id: session.node_id,
+          permanent,
         }),
         created_at: new Date(),
       })
@@ -261,23 +278,91 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
             id: crypto.randomUUID(),
             node_id: session.node_id,
             action: 'kick_vpn_session',
-            payload: JSON.stringify({ common_name: commonName }),
+            payload: JSON.stringify({ common_name: commonName, permanent }),
             status: 'pending',
             result: null,
             error_message: null,
             created_at: new Date(),
             completed_at: null,
           })
-          app.log.info(`[sessions/kick] Enqueued kick_vpn_session task for ${commonName} on node ${session.node_id}`)
+          app.log.info(`[sessions/kick] Enqueued kick_vpn_session (permanent=${permanent}) for ${commonName} on node ${session.node_id}`)
         } catch (taskErr) {
-          // Non-fatal — DB record is already closed; agent will reconcile on next status poll
           app.log.error(`[sessions/kick] Failed to enqueue disconnect task: ${(taskErr as Error).message}`)
         }
       } else {
-        app.log.warn(`[sessions/kick] Could not resolve username for user_id ${session.user_id} — VPN client may remain connected until it disconnects naturally`)
+        app.log.warn(`[sessions/kick] Could not resolve username for user_id ${session.user_id}`)
       }
 
-      return { ok: true, message: 'Session kicked' }
+      return {
+        ok: true,
+        message: permanent ? 'Session kicked and reconnection blocked' : 'Session kicked',
+        permanent,
+      }
+    },
+  )
+
+  // POST /api/v1/sessions/:id/unkick  — restore reconnect access after permanent kick
+  app.post<{ Params: { id: string } }>(
+    '/sessions/:id/unkick',
+    {
+      onRequest: [app.authenticate],
+      schema: { tags: ['sessions'], summary: 'Unkick session — restore reconnect access (admin only)', security: [{ bearerAuth: [] }] },
+    },
+    async (request, reply) => {
+      const user = request.user as { id: string; username: string; role: string }
+      if (user.role !== 'admin') {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Admin access required' })
+      }
+
+      const { id } = request.params
+
+      // Find session (active or historical)
+      const session = await app.db('vpn_sessions').where({ id }).first()
+      if (!session) {
+        return reply.status(404).send({ error: 'Session not found' })
+      }
+
+      const kickedUser = await app.db('users').where({ id: session.user_id }).first()
+      const commonName = kickedUser?.username ?? null
+
+      if (!commonName) {
+        return reply.status(422).send({ error: 'Could not resolve username for this session' })
+      }
+
+      // Dispatch unkick task to agent on the node
+      try {
+        await app.db('tasks').insert({
+          id: crypto.randomUUID(),
+          node_id: session.node_id,
+          action: 'unkick_vpn_session',
+          payload: JSON.stringify({ common_name: commonName }),
+          status: 'pending',
+          result: null,
+          error_message: null,
+          created_at: new Date(),
+          completed_at: null,
+        })
+        app.log.info(`[sessions/unkick] Enqueued unkick_vpn_session for ${commonName} on node ${session.node_id}`)
+      } catch (taskErr) {
+        app.log.error(`[sessions/unkick] Failed to enqueue unkick task: ${(taskErr as Error).message}`)
+        return reply.status(500).send({ error: 'Failed to dispatch unkick task' })
+      }
+
+      // Log audit
+      await app.db('audit_logs').insert({
+        id: crypto.randomUUID(),
+        user_id: user.id,
+        username: user.username,
+        action: 'session_unkick',
+        resource_type: 'vpn_session',
+        resource_id: id,
+        session_id: id,
+        ip_address: request.ip,
+        metadata: JSON.stringify({ unkicked_user: commonName, node_id: session.node_id }),
+        created_at: new Date(),
+      })
+
+      return { ok: true, message: `Reconnect access restored for ${commonName}` }
     },
   )
 }
