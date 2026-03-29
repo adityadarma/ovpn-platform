@@ -3,86 +3,123 @@ import type { VpnDriver } from '../drivers'
 
 /**
  * Event Monitor Service
- * 
- * Listens to realtime VPN events (connect/disconnect) and reports to API server.
- * This replaces the old bash script hooks (client-connect/client-disconnect).
+ *
+ * Listens to realtime VPN events from the management interface.
+ * The management interface sends >CLIENT:ENV lines with every connect event,
+ * containing IV_PLAT, IV_VER, IV_GUI_VER, common_name, ifconfig_pool_remote_ip,
+ * trusted_ip etc. — all the info we need without any external shell scripts.
+ *
+ * This approach avoids the "openvpn_execve: unable to fork" crash that occurs
+ * when using client-connect/client-disconnect shell scripts on systems with
+ * tight process limits for the `nobody` user.
  */
+
+interface ClientEnvVars {
+  common_name?: string
+  trusted_ip?: string
+  ifconfig_pool_remote_ip?: string
+  // IV_ vars from TLS handshake peer info
+  IV_PLAT?: string   // "win" | "mac" | "linux" | "android" | "ios"
+  IV_VER?: string    // OpenVPN version e.g. "3.11.3"
+  IV_GUI_VER?: string // GUI app + version e.g. "OCmacOS_3.8.1-5790"
+  [key: string]: string | undefined
+}
 
 interface ClientConnectEvent {
   clientId: string
   keyId: string
   timestamp: Date
+  envVars?: ClientEnvVars
 }
 
 interface ClientDisconnectEvent {
   clientId: string
   timestamp: Date
-}
-
-interface ClientReauthEvent {
-  clientId: string
-  keyId: string
-  timestamp: Date
+  username?: string
+  vpnIp?: string
+  realIp?: string
 }
 
 /**
- * Get client details from VPN driver by client ID
+ * Build a human-readable device_name from IV_ vars.
+ *
+ * Priority:
+ *   1. IV_GUI_VER  e.g. "OCmacOS_3.8.1-5790"  → "OpenVPN Connect macOS 3.8.1"
+ *   2. IV_PLAT + IV_VER  e.g. "mac" + "3.11.3" → "macOS (OpenVPN 3.11.3)"
+ *   3. null
  */
-async function getClientDetails(driver: VpnDriver, clientId: string) {
+function buildDeviceName(env: ClientEnvVars): string | null {
+  const gui = env.IV_GUI_VER // e.g. "OCmacOS_3.8.1-5790" or "OpenVPN_GUI_11.28.0.0"
+  if (gui) {
+    // Strip trailing build numbers (e.g. -5790) and replace underscores
+    return gui.replace(/-\d+$/, '').replace(/_/g, ' ')
+  }
+
+  const plat = env.IV_PLAT
+  const ver = env.IV_VER
+  if (plat) {
+    const platformMap: Record<string, string> = {
+      win: 'Windows', mac: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS',
+    }
+    const platform = platformMap[plat] ?? plat
+    return ver ? `${platform} (OpenVPN ${ver})` : platform
+  }
+
+  return null
+}
+
+/**
+ * Get client details from status when env vars are not available (fallback).
+ */
+async function getClientDetailsByUsername(driver: VpnDriver, username: string) {
   try {
-    const clients = await driver.getClients()
-    
-    // Try to find client by matching client ID in common name or other fields
-    // Note: OpenVPN management interface doesn't directly expose CID in status
-    // We'll need to use the status command to get more details
-    
-    const statusOutput = await driver.sendCommand('status 3')
+    const statusOutput = await (driver as any).sendCommand('status 3') as string
     const lines = statusOutput.split('\n')
-    
     for (const line of lines) {
       if (line.startsWith('CLIENT_LIST')) {
         const parts = line.split('\t')
-        
-        // CLIENT_LIST format includes Client ID at position 10
-        if (parts.length >= 11 && parts[10] === clientId) {
+        if (parts.length >= 8 && parts[1] === username) {
           return {
-            username: parts[1], // Common Name
-            realIp: parts[2].split(':')[0], // Real Address (remove port)
-            vpnIp: parts[3], // Virtual Address
+            username: parts[1],
+            realIp: parts[2].split(':')[0],
+            vpnIp: parts[3],
             bytesSent: parseInt(parts[6], 10) || 0,
             bytesReceived: parseInt(parts[5], 10) || 0,
           }
         }
       }
     }
-    
-    return null
-  } catch (err) {
-    console.error('[event-monitor] Failed to get client details:', (err as Error).message)
-    return null
+  } catch {
+    /* ignore */
   }
+  return null
 }
 
 /**
- * Handle client connect event
+ * Handle client connect event — invoked after full ENV block is received.
  */
 async function handleConnect(
   env: AgentEnv,
   event: ClientConnectEvent,
-  driver: VpnDriver,
+  _driver: VpnDriver,
 ): Promise<void> {
-  console.log(`[event-monitor] Processing connect event: CID=${event.clientId}`)
-  
-  // Wait a bit for client to fully establish connection
-  await new Promise(resolve => setTimeout(resolve, 1000))
-  
-  const details = await getClientDetails(driver, event.clientId)
-  
-  if (!details) {
-    console.warn(`[event-monitor] Could not get details for client ${event.clientId}`)
+  const vars = event.envVars ?? {}
+  const username = vars.common_name
+  const vpnIp = vars.ifconfig_pool_remote_ip
+  const realIp = vars.trusted_ip
+
+  if (!username || !vpnIp) {
+    console.warn(`[event-monitor] Connect event missing common_name(${username}) or vpnIp(${vpnIp}) — skipping`)
     return
   }
-  
+
+  const deviceName = buildDeviceName(vars)
+  const clientVersion = vars.IV_VER ?? null
+
+  console.log(`[event-monitor] 🔗 Connect: ${username} from ${realIp} → ${vpnIp}`)
+  if (deviceName) console.log(`[event-monitor]    Device: ${deviceName}`)
+  if (clientVersion) console.log(`[event-monitor]    Version: OpenVPN ${clientVersion}`)
+
   try {
     const response = await fetch(`${env.AGENT_MANAGER_URL}/api/v1/vpn/connect`, {
       method: 'POST',
@@ -91,48 +128,57 @@ async function handleConnect(
         'X-VPN-Token': env.VPN_TOKEN,
       },
       body: JSON.stringify({
-        username: details.username,
-        vpn_ip: details.vpnIp,
-        real_ip: details.realIp,
+        username,
+        vpn_ip: vpnIp,
+        real_ip: realIp,
         node_id: env.AGENT_NODE_ID,
+        device_name: deviceName,
+        client_version: clientVersion,
       }),
       signal: AbortSignal.timeout(5000),
     })
-    
+
     if (!response.ok) {
       const text = await response.text()
-      console.error(`[event-monitor] Connect API failed: ${response.status} ${text}`)
+      console.error(`[event-monitor] ✗ Connect API failed ${response.status}: ${text}`)
       return
     }
-    
+
     const data = await response.json() as { session_id: string }
-    console.log(`[event-monitor] ✓ Connect recorded: ${details.username} → session ${data.session_id}`)
+    console.log(`[event-monitor] ✓ Session created: ${username} → ${data.session_id}`)
   } catch (err) {
-    console.error('[event-monitor] Connect API error:', (err as Error).message)
+    console.error('[event-monitor] ✗ Connect API error:', (err as Error).message)
   }
 }
 
 /**
- * Handle client disconnect event
+ * Handle client disconnect event.
+ * The driver now caches CID→{username,vpnIp,realIp} so we have the info
+ * even after the client has left the status output.
  */
 async function handleDisconnect(
   env: AgentEnv,
   event: ClientDisconnectEvent,
   driver: VpnDriver,
 ): Promise<void> {
-  console.log(`[event-monitor] Processing disconnect event: CID=${event.clientId}`)
-  
-  // Try to get client details before they're gone
-  // Note: Client might already be disconnected, so we may not get details
-  const details = await getClientDetails(driver, event.clientId)
-  
-  if (!details) {
-    console.warn(`[event-monitor] Could not get details for disconnected client ${event.clientId}`)
-    // We still need to try to close the session, but we don't have username
-    // This is a limitation - we might need to maintain a local cache of CID -> username
+  let username = event.username
+  let bytesSent = 0
+  let bytesReceived = 0
+
+  // If we got username from the driver cache, try to get bytes from status (client may still be there briefly)
+  if (username) {
+    const details = await getClientDetailsByUsername(driver, username)
+    if (details) {
+      bytesSent = details.bytesSent
+      bytesReceived = details.bytesReceived
+    }
+  } else {
+    console.warn(`[event-monitor] Disconnect CID=${event.clientId} — username unknown (no driver cache hit)`)
     return
   }
-  
+
+  console.log(`[event-monitor] 👋 Disconnect: ${username}`)
+
   try {
     const response = await fetch(`${env.AGENT_MANAGER_URL}/api/v1/vpn/disconnect`, {
       method: 'POST',
@@ -141,71 +187,48 @@ async function handleDisconnect(
         'X-VPN-Token': env.VPN_TOKEN,
       },
       body: JSON.stringify({
-        username: details.username,
+        username,
         node_id: env.AGENT_NODE_ID,
-        bytes_sent: details.bytesSent,
-        bytes_received: details.bytesReceived,
+        bytes_sent: bytesSent,
+        bytes_received: bytesReceived,
         disconnect_reason: 'normal',
       }),
       signal: AbortSignal.timeout(5000),
     })
-    
+
     if (!response.ok) {
       const text = await response.text()
-      console.error(`[event-monitor] Disconnect API failed: ${response.status} ${text}`)
+      console.error(`[event-monitor] ✗ Disconnect API failed ${response.status}: ${text}`)
       return
     }
-    
-    console.log(`[event-monitor] ✓ Disconnect recorded: ${details.username}`)
+
+    console.log(`[event-monitor] ✓ Disconnect recorded: ${username}`)
   } catch (err) {
-    console.error('[event-monitor] Disconnect API error:', (err as Error).message)
+    console.error('[event-monitor] ✗ Disconnect API error:', (err as Error).message)
   }
 }
 
 /**
- * Handle client reauth event
- */
-async function handleReauth(
-  env: AgentEnv,
-  event: ClientReauthEvent,
-  driver: VpnDriver,
-): Promise<void> {
-  console.log(`[event-monitor] Client reauthentication: CID=${event.clientId}`)
-  // Reauth doesn't need API call, just log it
-}
-
-/**
- * Start event monitoring for VPN driver
+ * Start event monitoring for VPN driver.
  */
 export function startEventMonitor(env: AgentEnv, driver: VpnDriver): void {
-  console.log('📡 Event monitor started (realtime VPN events)')
-  console.log(`   VPN Token: ${env.VPN_TOKEN.substring(0, 10)}...`)
-  console.log(`   API URL: ${env.AGENT_MANAGER_URL}/api/v1/vpn/connect`)
-  
-  // Listen to client connect events
+  console.log('📡 Event monitor started (realtime VPN events via management interface)')
+  console.log('   Device info: captured from IV_PLAT / IV_GUI_VER env vars (no external scripts needed)')
+
   driver.on('client-connect', (event: ClientConnectEvent) => {
-    console.log('[event-monitor] 🔔 Received client-connect event:', event)
+    console.log(`[event-monitor] 🔔 client-connect CID=${event.clientId}`)
     void handleConnect(env, event, driver)
   })
-  
-  // Listen to client disconnect events
+
   driver.on('client-disconnect', (event: ClientDisconnectEvent) => {
-    console.log('[event-monitor] 🔔 Received client-disconnect event:', event)
+    console.log(`[event-monitor] 🔔 client-disconnect CID=${event.clientId}`)
     void handleDisconnect(env, event, driver)
   })
-  
-  // Listen to client reauth events
-  driver.on('client-reauth', (event: ClientReauthEvent) => {
-    console.log('[event-monitor] 🔔 Received client-reauth event:', event)
-    void handleReauth(env, event, driver)
+
+  driver.on('client-reauth', (event: { clientId: string }) => {
+    console.log(`[event-monitor] 🔔 client-reauth CID=${event.clientId}`)
   })
-  
-  // Debug: Log when driver emits any event
-  driver.on('connected', () => {
-    console.log('[event-monitor] Driver connected')
-  })
-  
-  driver.on('disconnected', () => {
-    console.log('[event-monitor] Driver disconnected')
-  })
+
+  driver.on('connected', () => console.log('[event-monitor] Driver connected'))
+  driver.on('disconnected', () => console.log('[event-monitor] Driver disconnected'))
 }

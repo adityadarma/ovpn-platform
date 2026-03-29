@@ -27,6 +27,12 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 10
 
+  // Accumulate >CLIENT:ENV lines per CID until ENV,END
+  private pendingEnv: Map<string, Record<string, string>> = new Map()
+
+  // Cache CID → client info so disconnect events still have username/IP
+  private clientCache: Map<string, { username: string; vpnIp: string; realIp: string }> = new Map()
+
   constructor(
     private socketPath: string = '/run/openvpn/server.sock',
     private reconnectInterval: number = 5000,
@@ -166,8 +172,10 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
       return
     }
 
-    // Skip CLIENT:ENV lines (environment variables)
+    // Accumulate CLIENT:ENV lines — delivered between CLIENT:CONNECT and ENV,END
+    // These contain IV_PLAT, IV_VER, IV_GUI_VER, common_name, ifconfig_pool_remote_ip etc.
     if (line.startsWith('>CLIENT:ENV,')) {
+      this.handleClientEnv(line)
       return
     }
     
@@ -199,41 +207,83 @@ export class OpenVpnManagementDriver extends EventEmitter implements VpnDriver {
   private handleClientConnect(line: string): void {
     try {
       // Format: >CLIENT:CONNECT,{CID},{KID}
-      // Example: >CLIENT:CONNECT,0,1
       const parts = line.split(',')
-      
       if (parts.length >= 2) {
-        const clientId = parts[1]
-        const keyId = parts[2] || ''
-        
+        const clientId = parts[1].trim()
+        const keyId = (parts[2] || '').trim()
         console.log(`[openvpn-driver] Client connecting: CID=${clientId}, KID=${keyId}`)
-        
-        this.emit('client-connect', {
-          clientId,
-          keyId,
-          timestamp: new Date(),
-        })
+        // Initialise env accumulator for this CID
+        this.pendingEnv.set(clientId, {})
       }
     } catch (err) {
       console.error('[openvpn-driver] Failed to parse CLIENT:CONNECT:', err)
     }
   }
 
+  private handleClientEnv(line: string): void {
+    try {
+      // Format: >CLIENT:ENV,KEY=VALUE  or  >CLIENT:ENV,END
+      const payload = line.slice('>CLIENT:ENV,'.length)
+
+      if (payload.trim() === 'END') {
+        // ENV stream is complete — determine which CID this belongs to
+        // OpenVPN sends ENV lines sequentially per CID; the last open accumulator is the one
+        // We iterate pendingEnv in insertion order and emit for the first complete set
+        for (const [clientId, envVars] of this.pendingEnv.entries()) {
+          const keyId = ''
+          console.log(`[openvpn-driver] Client connected: CID=${clientId}, IV_PLAT=${envVars['IV_PLAT'] ?? 'unknown'}, IV_GUI_VER=${envVars['IV_GUI_VER'] ?? '-'}`)
+
+          // Cache client info for disconnect lookup
+          const username = envVars['common_name'] ?? ''
+          const vpnIp = envVars['ifconfig_pool_remote_ip'] ?? ''
+          const realIp = (envVars['trusted_ip'] ?? '').split(':')[0]
+          if (username) this.clientCache.set(clientId, { username, vpnIp, realIp })
+
+          this.emit('client-connect', {
+            clientId,
+            keyId,
+            timestamp: new Date(),
+            envVars,
+          })
+          this.pendingEnv.delete(clientId)
+          break // Only one client connects at a time
+        }
+        return
+      }
+
+      // KEY=VALUE  — add to the most-recently-started CID accumulator
+      const eqIdx = payload.indexOf('=')
+      if (eqIdx === -1) return
+      const key = payload.slice(0, eqIdx)
+      const value = payload.slice(eqIdx + 1)
+
+      // Find the latest CID accumulator
+      const entries = [...this.pendingEnv.entries()]
+      if (entries.length > 0) {
+        const [latestCid, envMap] = entries[entries.length - 1]
+        envMap[key] = value
+        this.pendingEnv.set(latestCid, envMap)
+      }
+    } catch (err) {
+      console.error('[openvpn-driver] Failed to parse CLIENT:ENV:', err)
+    }
+  }
+
   private handleClientDisconnect(line: string): void {
     try {
       // Format: >CLIENT:DISCONNECT,{CID}
-      // Example: >CLIENT:DISCONNECT,0
       const parts = line.split(',')
-      
       if (parts.length >= 2) {
-        const clientId = parts[1]
-        
+        const clientId = parts[1].trim()
         console.log(`[openvpn-driver] Client disconnecting: CID=${clientId}`)
-        
+        const cached = this.clientCache.get(clientId)
         this.emit('client-disconnect', {
           clientId,
           timestamp: new Date(),
+          // Include cached client info so event-monitor can identify the user
+          ...(cached ?? {}),
         })
+        this.clientCache.delete(clientId)
       }
     } catch (err) {
       console.error('[openvpn-driver] Failed to parse CLIENT:DISCONNECT:', err)
