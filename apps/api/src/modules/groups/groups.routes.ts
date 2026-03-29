@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
-import { nextAvailableIp, getNetmask, parseCidr } from '../../services/ip-pool.service'
+import { nextAvailableIp, getNetmask, parseCidr, cidrsToPushRoutes } from '../../services/ip-pool.service'
 
 interface Group {
   id: string
@@ -184,7 +184,13 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const { network_id } = request.body
       if (!network_id) return reply.status(400).send({ error: 'network_id required' })
-      await app.db('group_networks').insert({ group_id: request.params.id, network_id }).onConflict(['group_id', 'network_id']).ignore()
+      await app.db('group_networks')
+        .insert({ group_id: request.params.id, network_id })
+        .onConflict(['group_id', 'network_id']).ignore()
+
+      // Re-enqueue CCD tasks so members get updated push routes
+      await reenqueueGroupCcdTasks(app, request.params.id)
+
       return reply.status(201).send({ ok: true })
     },
   )
@@ -194,7 +200,13 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
     '/groups/:id/networks/:networkId',
     { onRequest: [app.authenticateAdmin], schema: { tags: ['groups'], summary: 'Remove network from group', security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
-      await app.db('group_networks').where({ group_id: request.params.id, network_id: request.params.networkId }).delete()
+      await app.db('group_networks')
+        .where({ group_id: request.params.id, network_id: request.params.networkId })
+        .delete()
+
+      // Re-enqueue CCD tasks so members lose the removed route
+      await reenqueueGroupCcdTasks(app, request.params.id)
+
       return reply.status(204).send()
     },
   )
@@ -258,3 +270,67 @@ async function assignVpnIp(
 export { assignVpnIp }
 export default groupRoutes
 export type { Group }
+
+/**
+ * Re-enqueue write_client_ccd tasks for all members of a group that have a VPN IP.
+ * Called when networks are added or removed from a group, so CCD files
+ * are updated with current push routes on all online nodes.
+ */
+async function reenqueueGroupCcdTasks(app: any, groupId: string): Promise<void> {
+  // Get all groups this group's members belong to (they may be in multiple groups)
+  const members = await app.db('user_groups as ug')
+    .join('users as u', 'ug.user_id', 'u.id')
+    .where('ug.group_id', groupId)
+    .whereNotNull('u.vpn_ip')
+    .select('u.id', 'u.username', 'u.vpn_ip', 'u.vpn_group_id')
+
+  if (members.length === 0) return
+
+  const onlineNodes = await app.db('vpn_nodes').where({ status: 'online' }).select('id')
+  if (onlineNodes.length === 0) return
+
+  const tasks: any[] = []
+
+  for (const member of members) {
+    // Get all networks from all the user's groups
+    const userGroupIds = await app.db('user_groups')
+      .where({ user_id: member.id })
+      .pluck('group_id') as string[]
+
+    const networkCidrs = await app.db('group_networks as gn')
+      .join('networks as n', 'gn.network_id', 'n.id')
+      .whereIn('gn.group_id', userGroupIds)
+      .distinct('n.cidr')
+      .pluck('n.cidr') as string[]
+
+    const extraLines = cidrsToPushRoutes(networkCidrs)
+
+    // Get netmask from primary group
+    let netmask = '255.255.255.0'
+    if (member.vpn_group_id) {
+      const primaryGroup = await app.db('groups').where({ id: member.vpn_group_id }).first()
+      if (primaryGroup?.vpn_subnet) netmask = getNetmask(primaryGroup.vpn_subnet)
+    }
+
+    for (const node of onlineNodes) {
+      tasks.push({
+        id: crypto.randomUUID(),
+        node_id: node.id,
+        action: 'write_client_ccd',
+        payload: JSON.stringify({
+          username: member.username,
+          vpn_ip: member.vpn_ip,
+          netmask,
+          extra_lines: extraLines,
+        }),
+        status: 'pending',
+        created_at: new Date(),
+      })
+    }
+  }
+
+  if (tasks.length > 0) {
+    await app.db('tasks').insert(tasks)
+    app.log.info(`[ip-pool] Re-enqueued ${tasks.length} CCD task(s) after network change on group ${groupId}`)
+  }
+}

@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { CreateUserSchema, UpdateUserSchema } from '@vpn/shared'
-import { nextAvailableIp, getNetmask } from '../../services/ip-pool.service'
+import { nextAvailableIp, getNetmask, cidrToRoute, cidrsToPushRoutes } from '../../services/ip-pool.service'
 
 const userRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/users
@@ -93,7 +93,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       if (vpnIp && resolvedGroupId) {
         const group = await app.db('groups').where({ id: resolvedGroupId }).first()
         const netmask = group?.vpn_subnet ? getNetmask(group.vpn_subnet) : '255.255.255.0'
-        await enqueueCcdTask(app, input.username, vpnIp, netmask)
+        await enqueueCcdTask(app, input.username, vpnIp, netmask, id)
       }
 
       const user = await app.db('users as u')
@@ -171,7 +171,7 @@ const userRoutes: FastifyPluginAsync = async (app) => {
 
             // Enqueue CCD update
             const netmask = getNetmask(newGroup.vpn_subnet)
-            await enqueueCcdTask(app, user.username, newIp, netmask)
+            await enqueueCcdTask(app, user.username, newIp, netmask, id)
           } else {
             updates['vpn_group_id'] = vpnGroupId
           }
@@ -720,16 +720,36 @@ const userRoutes: FastifyPluginAsync = async (app) => {
       const protocol = node.protocol || 'udp'
       const cipher = node.cipher || 'AES-128-GCM'
       const authDigest = node.auth_digest || 'SHA256'
-      
+
+      // Fetch all network CIDRs assigned to ALL user's groups → split-tunnel routes
+      const userGroupIds = await app.db('user_groups')
+        .where({ user_id: id })
+        .pluck('group_id') as string[]
+
+      let routeLines = ''
+      if (userGroupIds.length > 0) {
+        const networks = await app.db('group_networks as gn')
+          .join('networks as n', 'gn.network_id', 'n.id')
+          .whereIn('gn.group_id', userGroupIds)
+          .select('n.cidr', 'n.name')
+          .distinct('n.cidr')
+        if (networks.length > 0) {
+          const routeComments = networks.map((n: { cidr: string; name: string }) =>
+            `# ${n.name}: ${n.cidr}\n${cidrToRoute(n.cidr)}`
+          ).join('\n')
+          routeLines = `\n# Split-tunnel routes (from group network assignments)\n${routeComments}\n`
+        }
+      }
+
       // Build config with node-specific settings
       const protoClient = protocol === 'tcp' ? 'tcp-client' : protocol
-      
+
       // Determine TLS cipher based on server cipher
       let tlsCipher = 'TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256'
       if (cipher.includes('256')) {
         tlsCipher = 'TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384'
       }
-      
+
       let config = `client
 proto ${protoClient}
 ${protocol === 'udp' ? 'explicit-exit-notify' : ''}
@@ -749,7 +769,7 @@ tls-cipher ${tlsCipher}
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns
 verb 3
-
+${routeLines}
 <ca>
 ${node.ca_cert.trim()}
 </ca>
@@ -787,14 +807,14 @@ ${node.ta_key.trim()}
 
 /**
  * Enqueue a write_client_ccd task to all online VPN nodes.
- * This ensures the CCD file with ifconfig-push is written on every node
- * that has the user's certificates.
+ * Fetches the user's group networks and includes them as push routes in the CCD.
  */
 async function enqueueCcdTask(
   app: any,
   username: string,
   vpnIp: string,
   netmask: string,
+  userId?: string,
 ): Promise<void> {
   const onlineNodes = await app.db('vpn_nodes').where({ status: 'online' }).select('id')
   if (onlineNodes.length === 0) {
@@ -802,11 +822,32 @@ async function enqueueCcdTask(
     return
   }
 
+  // Fetch network routes from all user's groups
+  let extraLines: string[] = []
+  if (userId) {
+    const groupIds = await app.db('user_groups')
+      .where({ user_id: userId })
+      .pluck('group_id') as string[]
+
+    if (groupIds.length > 0) {
+      const networks = await app.db('group_networks as gn')
+        .join('networks as n', 'gn.network_id', 'n.id')
+        .whereIn('gn.group_id', groupIds)
+        .distinct('n.cidr')
+        .pluck('n.cidr') as string[]
+
+      extraLines = cidrsToPushRoutes(networks)
+      if (extraLines.length > 0) {
+        app.log.info(`[ip-pool] Including ${extraLines.length} network route(s) in CCD for ${username}`)
+      }
+    }
+  }
+
   const tasks = onlineNodes.map((node: { id: string }) => ({
     id: crypto.randomUUID(),
     node_id: node.id,
     action: 'write_client_ccd',
-    payload: JSON.stringify({ username, vpn_ip: vpnIp, netmask }),
+    payload: JSON.stringify({ username, vpn_ip: vpnIp, netmask, extra_lines: extraLines }),
     status: 'pending',
     created_at: new Date(),
   }))

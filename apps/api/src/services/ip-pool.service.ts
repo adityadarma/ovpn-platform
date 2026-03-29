@@ -102,3 +102,24 @@ export function ipInSubnet(ip: string, subnet: string): boolean {
   const ipInt = (parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!
   return ((ipInt & maskInt) >>> 0) === networkInt
 }
+
+/**
+ * Convert a CIDR to an OpenVPN route directive string.
+ * e.g. "172.31.0.0/16" → "route 172.31.0.0 255.255.0.0"
+ */
+export function cidrToRoute(cidr: string): string {
+  const { networkInt, netmask } = parseCidr(cidr)
+  const ip = intToIp(networkInt)
+  return `route ${ip} ${netmask}`
+}
+
+/**
+ * Convert multiple CIDRs to OpenVPN push route directives.
+ * e.g. ["172.31.0.0/16", "10.130.0.0/20"]
+ *   → ['push "route 172.31.0.0 255.255.0.0"', 'push "route 10.130.0.0 255.255.240.0"']
+ */
+export function cidrsToPushRoutes(cidrs: string[]): string[] {
+  return cidrs
+    .filter(c => c?.trim())
+    .map(c => `push "${cidrToRoute(c.trim())}"`)
+}
