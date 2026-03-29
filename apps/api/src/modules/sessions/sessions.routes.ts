@@ -72,7 +72,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
     },
   )
 
-  // GET /api/v1/sessions/history
+  // GET /api/v1/sessions/history — only completed (disconnected) sessions
   app.get(
     '/sessions/history',
     { onRequest: [app.authenticate], schema: { tags: ['sessions'], summary: 'Session history', security: [{ bearerAuth: [] }] } },
@@ -85,6 +85,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
       let queryBuilder = app.db('vpn_sessions as s')
         .join('users as u', 's.user_id', 'u.id')
         .join('vpn_nodes as n', 's.node_id', 'n.id')
+        .whereNotNull('s.disconnected_at')
 
       // Filter by user_id if provided
       if (query.user_id) {
@@ -97,6 +98,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const sessions = await queryBuilder
+        .clone()
         .select(
           's.id',
           'u.username',
@@ -116,9 +118,10 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         .limit(limit)
         .offset(offset)
 
-      // Get total count
-      const countResult = await app.db('vpn_sessions')
-        .count('* as count')
+      // Count only disconnected sessions (match the same filter)
+      const countResult = await queryBuilder
+        .clone()
+        .count('s.id as count')
         .first()
 
       const total = Number(countResult?.count || 0)

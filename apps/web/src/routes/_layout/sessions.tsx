@@ -83,15 +83,32 @@ interface KickDropdownProps {
 
 function KickDropdown({ sessionId, username, onKick, isPending }: KickDropdownProps) {
   const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+  function openMenu() {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    function close() { setOpen(false) }
+    document.addEventListener('mousedown', (e) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
+    })
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
 
   return (
     <div className="relative" ref={ref}>
@@ -109,9 +126,10 @@ function KickDropdown({ sessionId, username, onKick, isPending }: KickDropdownPr
           Kick
         </button>
 
-        {/* Dropdown arrow */}
+        {/* Dropdown trigger */}
         <button
-          onClick={() => setOpen(o => !o)}
+          ref={triggerRef}
+          onClick={openMenu}
           disabled={isPending}
           className="h-8 px-1 flex items-center text-red-600 hover:text-red-700 hover:bg-red-50 rounded-r-md border border-l-0 border-red-200 transition-colors disabled:opacity-50"
         >
@@ -119,8 +137,12 @@ function KickDropdown({ sessionId, username, onKick, isPending }: KickDropdownPr
         </button>
       </div>
 
+      {/* Fixed-position menu — escapes overflow:hidden on the table container */}
       {open && (
-        <div className="absolute right-0 top-9 z-50 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 text-sm">
+        <div
+          style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}
+          className="w-48 bg-white rounded-lg shadow-xl border border-gray-200 py-1 text-sm"
+        >
           <button
             className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
             onClick={() => {
@@ -157,6 +179,7 @@ function KickDropdown({ sessionId, username, onKick, isPending }: KickDropdownPr
     </div>
   )
 }
+
 
 // ── DisconnectReasonBadge ────────────────────────────────────────────────────
 function DisconnectReasonBadge({ reason }: { reason?: string }) {
