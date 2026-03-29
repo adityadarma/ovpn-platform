@@ -12,6 +12,7 @@ export type TaskAction =
   | 'update_server_config'
   | 'sync_certificates'
   | 'sync_server_config'
+  | 'kick_vpn_session'
 
 export interface Task {
   id: string

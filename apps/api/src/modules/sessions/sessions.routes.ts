@@ -224,7 +224,7 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
       const connectedAt = new Date(session.connected_at)
       const durationSeconds = Math.floor((now.getTime() - connectedAt.getTime()) / 1000)
 
-      // Close session
+      // Close session in DB
       await app.db('vpn_sessions')
         .where({ id })
         .update({
@@ -250,8 +250,32 @@ const sessionRoutes: FastifyPluginAsync = async (app) => {
         created_at: new Date(),
       })
 
-      // TODO: Send signal to agent to actually disconnect the user
-      // This requires agent to poll for kick commands or use WebSocket
+      // Look up the kicked user's username for the agent payload
+      const kickedUser = await app.db('users').where({ id: session.user_id }).first()
+      const commonName = kickedUser?.username ?? null
+
+      // Dispatch kick task to the node agent so the VPN tunnel is actually dropped
+      if (commonName) {
+        try {
+          await app.db('tasks').insert({
+            id: crypto.randomUUID(),
+            node_id: session.node_id,
+            action: 'kick_vpn_session',
+            payload: JSON.stringify({ common_name: commonName }),
+            status: 'pending',
+            result: null,
+            error_message: null,
+            created_at: new Date(),
+            completed_at: null,
+          })
+          app.log.info(`[sessions/kick] Enqueued kick_vpn_session task for ${commonName} on node ${session.node_id}`)
+        } catch (taskErr) {
+          // Non-fatal — DB record is already closed; agent will reconcile on next status poll
+          app.log.error(`[sessions/kick] Failed to enqueue disconnect task: ${(taskErr as Error).message}`)
+        }
+      } else {
+        app.log.warn(`[sessions/kick] Could not resolve username for user_id ${session.user_id} — VPN client may remain connected until it disconnects naturally`)
+      }
 
       return { ok: true, message: 'Session kicked' }
     },
